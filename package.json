@@ -1,0 +1,92 @@
+{
+  "name": "copy-code",
+  "displayName": "Copy Code",
+  "description": "A VSCode plugin for saving, organizing and reusing code snippets.",
+  "author": "StarCode000",
+  "publisher": "StarCode000",
+  "logo": "./logo.png",
+  "private": "true",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Snippets"
+  ],
+  "activationEvents": ["onView:copyCodeExplorer"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "copy-code.saveToLibrary",
+        "title": "Save to Code Library"
+      },
+      {
+        "command": "copy-code.rename",
+        "title": "Rename"
+      },
+      {
+        "command": "copy-code.createDirectory",
+        "title": "New Directory"
+      },
+      {
+        "command": "copy-code.appendCode",
+        "title": "Append Code"
+      },
+      {
+        "command": "copy-code.editSnippet",
+        "title": "Edit Snippet"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "copy-code.rename",
+          "when": "view == copyCodeExplorer"
+        },
+        {
+          "command": "copy-code.appendCode",
+          "when": "view == copyCodeExplorer"
+        },
+        {
+          "command": "copy-code.editSnippet",
+          "when": "view == copyCodeExplorer"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "copy-code.createDirectory",
+          "when": "view == copyCodeExplorer"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.97.0",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.19.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.7.3",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "uuid": "^11.1.0"
+  }
+}
