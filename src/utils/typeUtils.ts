@@ -19,28 +19,22 @@ export const isMap = (value: any): value is Map<any, any> => value instanceof Ma
 export const isSet = (value: any): value is Set<any> => value instanceof Set
 
 export function isDirectory(item: any): item is Directory {
-  return (
-    typeof (item as Directory) === 'object' &&
-    typeof (item as Directory) === 'string' &&
-    typeof (item as Directory).name === 'string' &&
-    typeof (item as Directory).parentId === 'string' &&
-    typeof (item as Directory).parentId === 'string' &&
-    typeof (item as Directory).order === 'number'
-  )
+  return item && 
+    typeof item.id === 'string' &&
+    typeof item.name === 'string' &&
+    (item.parentId === null || typeof item.parentId === 'string') &&
+    typeof item.order === 'number';
 }
 
 export function isCodeSnippet(item: any): item is CodeSnippet {
-  return (
-    typeof (item as CodeSnippet) === 'object' &&
-    typeof (item as CodeSnippet).id === 'string' &&
-    typeof (item as CodeSnippet).name === 'string' &&
-    typeof (item as CodeSnippet).code === 'string' &&
-    typeof (item as CodeSnippet).filePath === 'string' &&
-    typeof (item as CodeSnippet).fileName === 'string' &&
-    typeof (item as CodeSnippet).category === 'string' &&
-    typeof (item as CodeSnippet).parentId === 'string' &&
-    typeof (item as CodeSnippet).parentId === 'string' &&
-    typeof (item as CodeSnippet).order === 'number' &&
-    typeof (item as CodeSnippet).createTime === 'number'
-  )
+  return item &&
+    typeof item.id === 'string' &&
+    typeof item.name === 'string' &&
+    typeof item.code === 'string' &&
+    typeof item.filePath === 'string' &&
+    typeof item.fileName === 'string' &&
+    typeof item.category === 'string' &&
+    (item.parentId === null || typeof item.parentId === 'string') &&
+    typeof item.order === 'number' &&
+    typeof item.createTime === 'number';
 }

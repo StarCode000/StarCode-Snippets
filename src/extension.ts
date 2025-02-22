@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       // 提示用户输入名称
       const name = await vscode.window.showInputBox({
-        prompt: 'Enter a name for this code snippet',
+        prompt: '为代码片段命名',
       })
 
       if (name) {
@@ -60,7 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
   // 重命名命令
   let renameItem = vscode.commands.registerCommand('copy-code.rename', async (item: TreeItem) => {
     const newName = await vscode.window.showInputBox({
-      prompt: 'Enter new name',
+      prompt: '重命名...',
       value: item.label,
     })
 
@@ -74,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
   // 创建目录命令
   let createDirectory = vscode.commands.registerCommand('copy-code.createDirectory', async () => {
     const name = await vscode.window.showInputBox({
-      prompt: 'Enter directory name',
+      prompt: '输入目录名',
     })
 
     if (name) {

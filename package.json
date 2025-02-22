@@ -13,29 +13,47 @@
   "categories": [
     "Snippets"
   ],
-  "activationEvents": ["onView:copyCodeExplorer"],
+  "activationEvents": ["onView:copy-code-container"],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copy-code-container",
+          "title": "Copy Code",
+          "icon": "src/assets/img/view-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copy-code-container": [
+        {
+          "id": "copyCodeExplorer",
+          "name": "代码库",
+          "type": "tree"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "copy-code.saveToLibrary",
-        "title": "Save to Code Library"
+        "title": "(Copy Code)保存至代码库"
       },
       {
         "command": "copy-code.rename",
-        "title": "Rename"
+        "title": "(Copy Code)重命名代码模板"
       },
       {
         "command": "copy-code.createDirectory",
-        "title": "New Directory"
+        "title": "(Copy Code)新建目录"
       },
       {
         "command": "copy-code.appendCode",
-        "title": "Append Code"
+        "title": "(Copy Code)粘贴代码"
       },
       {
         "command": "copy-code.editSnippet",
-        "title": "Edit Snippet"
+        "title": "(Copy Code)编辑代码模板"
       }
     ],
     "menus": {
@@ -57,6 +75,11 @@
         {
           "command": "copy-code.createDirectory",
           "when": "view == copyCodeExplorer"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "copy-code.saveToLibrary"
         }
       ]
     }
