@@ -13,7 +13,9 @@
   "categories": [
     "Snippets"
   ],
-  "activationEvents": ["onView:copy-code-container"],
+  "activationEvents": [
+    "onView:copyCodeExplorer"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -37,51 +39,89 @@
     "commands": [
       {
         "command": "copy-code.saveToLibrary",
-        "title": "(Copy Code)保存至代码库"
+        "title": "保存至代码库",
+        "category": "Copy Code"
       },
       {
         "command": "copy-code.rename",
-        "title": "(Copy Code)重命名代码模板"
+        "title": "重命名",
+        "category": "Copy Code"
       },
       {
         "command": "copy-code.createDirectory",
-        "title": "(Copy Code)新建目录"
+        "title": "新建目录",
+        "category": "Copy Code",
+        "icon": "$(add)"
       },
       {
         "command": "copy-code.appendCode",
-        "title": "(Copy Code)粘贴代码"
+        "title": "粘贴代码",
+        "category": "Copy Code"
       },
       {
         "command": "copy-code.editSnippet",
-        "title": "(Copy Code)编辑代码模板"
+        "title": "编辑代码",
+        "category": "Copy Code"
+      },
+      {
+        "command": "copy-code.delete",
+        "title": "删除",
+        "category": "Copy Code"
+      },
+      {
+        "command": "copy-code.moveToDirectory",
+        "title": "移动到目录",
+        "category": "Copy Code"
       }
     ],
     "menus": {
       "view/item/context": [
         {
           "command": "copy-code.rename",
-          "when": "view == copyCodeExplorer"
+          "when": "view == copyCodeExplorer",
+          "group": "1_modification"
         },
         {
           "command": "copy-code.appendCode",
-          "when": "view == copyCodeExplorer"
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "2_operation"
         },
         {
           "command": "copy-code.editSnippet",
-          "when": "view == copyCodeExplorer"
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "2_operation"
+        },
+        {
+          "command": "copy-code.moveToDirectory",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "3_organization"
+        },
+        {
+          "command": "copy-code.delete",
+          "when": "view == copyCodeExplorer",
+          "group": "9_deletion"
         }
       ],
       "view/title": [
         {
           "command": "copy-code.createDirectory",
-          "when": "view == copyCodeExplorer"
+          "when": "view == copyCodeExplorer",
+          "group": "navigation"
         }
       ],
       "editor/context": [
         {
-          "command": "copy-code.saveToLibrary"
+          "command": "copy-code.saveToLibrary",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste"
         }
       ]
+    },
+    "capabilities": {
+      "untrustedWorkspaces": {
+        "supported": true
+      },
+      "virtualWorkspaces": true
     }
   },
   "scripts": {

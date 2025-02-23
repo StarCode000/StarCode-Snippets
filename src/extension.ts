@@ -11,7 +11,10 @@ export function activate(context: vscode.ExtensionContext) {
   const treeDataProvider = new CopyCodeTreeDataProvider(storageManager)
 
   // 注册视图
-  vscode.window.registerTreeDataProvider('copyCodeExplorer', treeDataProvider)
+  const treeView = vscode.window.createTreeView('copyCodeExplorer', {
+    treeDataProvider,
+    dragAndDropController: treeDataProvider.getDragAndDropController(),
+  })
 
   // 注册保存代码片段命令
   let saveToLibrary = vscode.commands.registerCommand('copy-code.saveToLibrary', async () => {
@@ -27,46 +30,69 @@ export function activate(context: vscode.ExtensionContext) {
       // 提示用户输入名称
       const name = await vscode.window.showInputBox({
         prompt: '为代码片段命名',
+        placeHolder: '输入代码片段名称'
       })
 
       if (name) {
-        const snippet: CodeSnippet = {
-          id: uuidv4(),
-          name,
-          code,
-          fileName,
-          filePath,
-          category: 'Default',
-          parentId: null,
-          order: 0,
-          createTime: Date.now(),
-        }
+        // 获取所有目录供选择
+        const directories = await storageManager.getAllDirectories()
+        const directoryItems = [
+          { label: '根目录', id: null },
+          ...directories.map(dir => ({ label: dir.name, id: dir.id }))
+        ]
 
-        await storageManager.saveSnippet(snippet)
-        treeDataProvider.refresh()
+        const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
+          placeHolder: '选择保存位置'
+        })
+
+        if (selectedDirectory) {
+          const snippet: CodeSnippet = {
+            id: uuidv4(),
+            name,
+            code,
+            fileName,
+            filePath,
+            category: selectedDirectory.label,
+            parentId: selectedDirectory.id,
+            order: 0,
+            createTime: Date.now(),
+          }
+
+          await storageManager.saveSnippet(snippet)
+          treeDataProvider.refresh()
+        }
       }
     }
   })
 
   // 注册预览代码片段命令
   let previewSnippet = vscode.commands.registerCommand('copy-code.previewSnippet', async (snippet: CodeSnippet) => {
+    if (!snippet) return
+
     const document = await vscode.workspace.openTextDocument({
       content: snippet.code,
-      language: 'typescript', // 可以根据文件扩展名决定语言
+      language: snippet.fileName.split('.').pop() || 'plaintext'
     })
-    await vscode.window.showTextDocument(document)
+    await vscode.window.showTextDocument(document, { preview: true })
   })
 
   // 重命名命令
   let renameItem = vscode.commands.registerCommand('copy-code.rename', async (item: TreeItem) => {
+    if (!item) return
+
     const newName = await vscode.window.showInputBox({
       prompt: '重命名...',
       value: item.label,
     })
 
-    if (newName && item.snippet) {
-      const updatedSnippet = { ...item.snippet, name: newName }
-      await storageManager.updateSnippet(updatedSnippet)
+    if (newName) {
+      if (item.snippet) {
+        const updatedSnippet = { ...item.snippet, name: newName }
+        await storageManager.updateSnippet(updatedSnippet)
+      } else if (item.directory) {
+        const updatedDirectory = { ...item.directory, name: newName }
+        await storageManager.updateDirectory(updatedDirectory)
+      }
       treeDataProvider.refresh()
     }
   })
@@ -75,6 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
   let createDirectory = vscode.commands.registerCommand('copy-code.createDirectory', async () => {
     const name = await vscode.window.showInputBox({
       prompt: '输入目录名',
+      placeHolder: '新建目录'
     })
 
     if (name) {
@@ -89,33 +116,91 @@ export function activate(context: vscode.ExtensionContext) {
     }
   })
 
+  // 删除命令
+  let deleteItem = vscode.commands.registerCommand('copy-code.delete', async (item: TreeItem) => {
+    if (!item) return
+
+    const confirmMessage = item.snippet 
+      ? `确定要删除代码片段 "${item.label}" 吗？`
+      : `确定要删除目录 "${item.label}" 及其所有内容吗？`;
+
+    const confirm = await vscode.window.showWarningMessage(
+      confirmMessage,
+      { modal: true },
+      '确定'
+    )
+
+    if (confirm === '确定') {
+      if (item.snippet) {
+        await storageManager.deleteSnippet(item.snippet.id)
+      } else if (item.directory) {
+        await storageManager.deleteDirectory(item.directory.id)
+      }
+      treeDataProvider.refresh()
+    }
+  })
+
   // 追加粘贴命令
   let appendCode = vscode.commands.registerCommand('copy-code.appendCode', async (item: TreeItem) => {
-    if (item.snippet) {
-      const editor = vscode.window.activeTextEditor
-      if (editor) {
-        const position = editor.selection.active
-        await editor.edit((editBuilder) => {
-          editBuilder.insert(position, item.snippet!.code)
-        })
-      }
+    if (!item?.snippet) return
+
+    const editor = vscode.window.activeTextEditor
+    if (editor) {
+      const position = editor.selection.active
+      await editor.edit((editBuilder) => {
+        editBuilder.insert(position, item.snippet!.code)
+      })
     }
   })
 
   // 编辑代码命令
   let editSnippet = vscode.commands.registerCommand('copy-code.editSnippet', async (item: TreeItem) => {
-    if (item.snippet) {
-      const updatedSnippet = await SnippetEditor.edit(item.snippet)
-      if (updatedSnippet) {
-        await storageManager.updateSnippet(updatedSnippet)
-        treeDataProvider.refresh()
-      }
+    if (!item?.snippet) return
+
+    const updatedSnippet = await SnippetEditor.edit(item.snippet)
+    if (updatedSnippet) {
+      await storageManager.updateSnippet(updatedSnippet)
+      treeDataProvider.refresh()
     }
   })
 
-  context.subscriptions.push(renameItem, createDirectory, appendCode, editSnippet)
+  // 移动到目录命令
+  let moveToDirectory = vscode.commands.registerCommand('copy-code.moveToDirectory', async (item: TreeItem) => {
+    if (!item?.snippet) return
 
-  context.subscriptions.push(saveToLibrary, previewSnippet)
+    const directories = await storageManager.getAllDirectories()
+    const directoryItems = [
+      { label: '根目录', id: null },
+      ...directories.map(dir => ({ label: dir.name, id: dir.id }))
+    ]
+
+    const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
+      placeHolder: '选择目标目录'
+    })
+
+    if (selectedDirectory) {
+      const updatedSnippet = {
+        ...item.snippet,
+        parentId: selectedDirectory.id,
+        category: selectedDirectory.label
+      }
+      await storageManager.updateSnippet(updatedSnippet)
+      treeDataProvider.refresh()
+    }
+  })
+
+  // 注册所有命令
+  context.subscriptions.push(
+    saveToLibrary,
+    previewSnippet,
+    renameItem,
+    createDirectory,
+    deleteItem,
+    appendCode,
+    editSnippet,
+    moveToDirectory,
+    treeView
+  )
 }
 
 export function deactivate() {}

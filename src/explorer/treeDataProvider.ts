@@ -26,37 +26,54 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
 
   async getChildren(element?: TreeItem): Promise<TreeItem[]> {
     if (!element) {
-      // 根级别项目
+      // 根级别：显示目录和未分类的代码片段
+      const [directories, snippets] = await Promise.all([
+        this.storageManager.getAllDirectories(),
+        this.storageManager.getAllSnippets()
+      ])
+
+      const items: TreeItem[] = []
+
+      // 添加目录
+      directories
+        .filter(dir => dir.parentId === null)
+        .sort((a, b) => a.order - b.order)
+        .forEach(dir => {
+          items.push(new TreeItem(
+            dir.name,
+            vscode.TreeItemCollapsibleState.Expanded,
+            undefined,
+            dir
+          ))
+        })
+
+      // 添加根级别的代码片段
+      snippets
+        .filter(snippet => snippet.parentId === null)
+        .sort((a, b) => a.order - b.order)
+        .forEach(snippet => {
+          items.push(new TreeItem(
+            snippet.name,
+            vscode.TreeItemCollapsibleState.None,
+            snippet
+          ))
+        })
+
+      return items
+    } else if (element.directory) {
+      // 目录内容：显示该目录下的代码片段
       const snippets = await this.storageManager.getAllSnippets()
-      return this.buildTree(snippets)
+      return snippets
+        .filter(snippet => snippet.parentId === element.directory!.id)
+        .sort((a, b) => a.order - b.order)
+        .map(snippet => new TreeItem(
+          snippet.name,
+          vscode.TreeItemCollapsibleState.None,
+          snippet
+        ))
     }
-    return element.children
-  }
 
-  private buildTree(snippets: CodeSnippet[]): TreeItem[] {
-    // 构建树形结构
-    const rootItems: TreeItem[] = []
-    const itemMap = new Map<string, TreeItem>()
-
-    // 首先创建所有目录
-    snippets.forEach((snippet) => {
-      if (snippet.parentId === null) {
-        const item = new TreeItem(snippet.name, vscode.TreeItemCollapsibleState.None, snippet)
-        rootItems.push(item)
-      } else {
-        // 处理在目录中的项目
-        if (!itemMap.has(snippet.parentId)) {
-          const parentItem = new TreeItem(snippet.category, vscode.TreeItemCollapsibleState.Expanded)
-          itemMap.set(snippet.parentId, parentItem)
-          rootItems.push(parentItem)
-        }
-        const parentItem = itemMap.get(snippet.parentId)!
-        const item = new TreeItem(snippet.name, vscode.TreeItemCollapsibleState.None, snippet)
-        parentItem.children.push(item)
-      }
-    })
-
-    return rootItems
+    return []
   }
 
   public getDragAndDropController(): vscode.TreeDragAndDropController<any> {
@@ -66,13 +83,18 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
 
 export class TreeItem extends vscode.TreeItem {
   children: TreeItem[] = []
+  contextValue: string
 
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly snippet?: CodeSnippet
+    public readonly snippet?: CodeSnippet,
+    public readonly directory?: Directory
   ) {
     super(label, collapsibleState)
+
+    // 设置上下文值用于控制右键菜单
+    this.contextValue = directory ? 'directory' : 'snippet'
 
     if (snippet) {
       this.tooltip = `${snippet.fileName}\n${snippet.filePath}`
@@ -81,6 +103,12 @@ export class TreeItem extends vscode.TreeItem {
         title: 'Preview Snippet',
         arguments: [snippet],
       }
+      // 设置代码片段图标
+      this.iconPath = new vscode.ThemeIcon('symbol-variable')
+    } else if (directory) {
+      this.tooltip = directory.name
+      // 设置目录图标
+      this.iconPath = new vscode.ThemeIcon('folder')
     }
   }
 }
