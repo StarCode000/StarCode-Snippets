@@ -3,9 +3,9 @@
   "displayName": "StarCode Snippets",
   "description": "A VSCode plugin for saving, organizing and reusing code snippets.",
   "author": "StarCode000",
+  "icon": "logo.png",
   "publisher": "StarCode000",
-  "logo": "./logo.png",
-  "version": "0.0.1-beta.1",
+  "version": "0.0.1",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -45,8 +45,8 @@
         "title": "重命名",
         "category": "StarCode Snippets",
         "icon": {
-          "light": "./src/assets/img/actions/rename-black.svg",
-          "dark": "./src/assets/img/actions/rename -white.svg"
+          "light": "./assets/img/actions/rename-black.png",
+          "dark": "./assets/img/actions/rename-white.png"
         }
       },
       {
@@ -59,8 +59,8 @@
         "title": "粘贴代码",
         "category": "StarCode Snippets",
         "icon": {
-          "light": "./src/assets/img/actions/paste-black.svg",
-          "dark": "./src/assets/img/actions/paste-white.svg"
+          "light": "./assets/img/actions/paste-black.png",
+          "dark": "./assets/img/actions/paste-white.png"
         }
       },
       {
@@ -68,8 +68,8 @@
         "title": "编辑代码",
         "category": "StarCode Snippets",
         "icon": {
-          "light": "./src/assets/img/actions/edit-black.svg",
-          "dark": "./src/assets/img/actions/edit-white.svg"
+          "light": "./assets/img/actions/edit-black.png",
+          "dark": "./assets/img/actions/edit-white.png"
         }
       },
       {
@@ -77,8 +77,8 @@
         "title": "删除",
         "category": "StarCode Snippets",
         "icon": {
-          "light": "./src/assets/img/actions/delete-black.svg",
-          "dark": "./src/assets/img/actions/delete-white.svg"
+          "light": "./assets/img/actions/delete-black.png",
+          "dark": "./assets/img/actions/delete-white.png"
         }
       },
       {
@@ -86,8 +86,8 @@
         "title": "移动到目录",
         "category": "StarCode Snippets",
         "icon": {
-          "light": "./src/assets/img/actions/move-black.svg",
-          "dark": "./src/assets/img/actions/move-white.svg"
+          "light": "./assets/img/actions/move-black.png",
+          "dark": "./assets/img/actions/move-white.png"
         }
       },
       {

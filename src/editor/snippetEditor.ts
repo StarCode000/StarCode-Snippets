@@ -76,7 +76,7 @@ export class SnippetEditor {
 
 function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
     // 获取Monaco编辑器的CDN URL
-    const monacoBaseUrl = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs';
+    const monacoBaseUrl = 'https://cdn.bootcdn.net/ajax/libs/monaco-editor/0.52.2/min/vs';
 
     return `<!DOCTYPE html>
     <html>
