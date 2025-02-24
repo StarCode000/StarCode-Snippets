@@ -1,71 +1,35 @@
-# copy-code README
+# StarCode Snippets
 
-This is the README for your extension "copy-code". After writing up a brief description, we recommend including the following sections.
+一个用于保存、组织和重用代码片段的VSCode插件。
 
-## Features
+## 功能特点
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- 在编辑器中选择代码后，可以快速保存到代码库中
+- 在侧边栏提供代码库视图，方便管理所有保存的代码片段
+- 支持创建目录来组织代码片段
+- 支持编辑、重命名、移动和删除代码片段
+- 支持快速粘贴已保存的代码片段
 
-For example if there is an image subfolder under your extension project workspace:
+## 使用方法
 
-\!\[feature X\]\(images/feature-x.png\)
+1. 在编辑器中选择代码，右键选择"保存至代码库"
+2. 在侧边栏的代码库中查看和管理已保存的代码片段
+3. 点击代码片段右侧的图标可以：
+   - 粘贴代码片段到当前位置
+   - 编辑代码片段内容
+   - 重命名代码片段
+   - 移动代码片段到其他目录
+   - 删除代码片段
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## 系统要求
 
-## Requirements
+- VS Code 1.97.0 或更高版本
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## 版本历史
 
-## Extension Settings
+### 0.0.1
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- 初始版本发布
+- 支持基本的代码片段保存和管理功能
+- 支持目录组织功能
+- 支持代码片段的编辑、重命名、移动和删除许可证

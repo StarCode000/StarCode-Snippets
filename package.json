@@ -1,12 +1,11 @@
 {
-  "name": "copy-code",
-  "displayName": "Copy Code",
+  "name": "starcode-snippets",
+  "displayName": "StarCode Snippets",
   "description": "A VSCode plugin for saving, organizing and reusing code snippets.",
   "author": "StarCode000",
   "publisher": "StarCode000",
   "logo": "./logo.png",
-  "private": "true",
-  "version": "0.0.1",
+  "version": "0.0.1-beta.1",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -20,14 +19,14 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "copy-code-container",
-          "title": "Copy Code",
-          "icon": "src/assets/img/view-icon.svg"
+          "id": "starcode-snippets-container",
+          "title": "StarCode Snippets",
+          "icon": "./icon.svg"
         }
       ]
     },
     "views": {
-      "copy-code-container": [
+      "starcode-snippets-container": [
         {
           "id": "copyCodeExplorer",
           "name": "代码库",
@@ -37,110 +36,110 @@
     },
     "commands": [
       {
-        "command": "copy-code.saveToLibrary",
-        "title": "保存至代码库",
-        "category": "Copy Code"
+        "command": "starcode-snippets.saveToLibrary",
+        "title": "📸 保存至代码库(StarCode Snippets)",
+        "category": "StarCode Snippets"
       },
       {
-        "command": "copy-code.rename",
+        "command": "starcode-snippets.rename",
         "title": "重命名",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": {
           "light": "./src/assets/img/actions/rename-black.svg",
           "dark": "./src/assets/img/actions/rename -white.svg"
         }
       },
       {
-        "command": "copy-code.createDirectory",
+        "command": "starcode-snippets.createDirectory",
         "title": "新建目录",
-        "category": "Copy Code"
+        "category": "StarCode Snippets"
       },
       {
-        "command": "copy-code.appendCode",
+        "command": "starcode-snippets.appendCode",
         "title": "粘贴代码",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": {
           "light": "./src/assets/img/actions/paste-black.svg",
           "dark": "./src/assets/img/actions/paste-white.svg"
         }
       },
       {
-        "command": "copy-code.editSnippet",
+        "command": "starcode-snippets.editSnippet",
         "title": "编辑代码",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": {
           "light": "./src/assets/img/actions/edit-black.svg",
           "dark": "./src/assets/img/actions/edit-white.svg"
         }
       },
       {
-        "command": "copy-code.delete",
+        "command": "starcode-snippets.delete",
         "title": "删除",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": {
           "light": "./src/assets/img/actions/delete-black.svg",
           "dark": "./src/assets/img/actions/delete-white.svg"
         }
       },
       {
-        "command": "copy-code.moveToDirectory",
+        "command": "starcode-snippets.moveToDirectory",
         "title": "移动到目录",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": {
           "light": "./src/assets/img/actions/move-black.svg",
           "dark": "./src/assets/img/actions/move-white.svg"
         }
       },
       {
-        "command": "copy-code.createSnippetInDirectory",
+        "command": "starcode-snippets.createSnippetInDirectory",
         "title": "新建代码片段",
-        "category": "Copy Code",
+        "category": "StarCode Snippets",
         "icon": "$(add)"
       }
     ],
     "menus": {
       "view/item/context": [
         {
-          "command": "copy-code.appendCode",
+          "command": "starcode-snippets.appendCode",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "inline"
         },
         {
-          "command": "copy-code.rename",
+          "command": "starcode-snippets.rename",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "inline"
         },
         {
-          "command": "copy-code.editSnippet",
+          "command": "starcode-snippets.editSnippet",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "inline"
         },
         {
-          "command": "copy-code.delete",
+          "command": "starcode-snippets.delete",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "inline"
         },
         {
-          "command": "copy-code.moveToDirectory",
+          "command": "starcode-snippets.moveToDirectory",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "inline"
         },
         {
-          "command": "copy-code.createSnippetInDirectory",
+          "command": "starcode-snippets.createSnippetInDirectory",
           "when": "view == copyCodeExplorer && viewItem == directory",
           "group": "inline"
         }
       ],
       "view/title": [
         {
-          "command": "copy-code.createDirectory",
+          "command": "starcode-snippets.createDirectory",
           "when": "view == copyCodeExplorer",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
-          "command": "copy-code.saveToLibrary",
+          "command": "starcode-snippets.saveToLibrary",
           "when": "editorHasSelection",
           "group": "9_cutcopypaste"
         }

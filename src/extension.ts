@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 注册保存代码片段命令
-  let saveToLibrary = vscode.commands.registerCommand('copy-code.saveToLibrary', async () => {
+  let saveToLibrary = vscode.commands.registerCommand('starcode-snippets.saveToLibrary', async () => {
     const editor = vscode.window.activeTextEditor
     if (editor) {
       const selection = editor.selection
@@ -84,7 +84,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 注册预览代码片段命令
-  let previewSnippet = vscode.commands.registerCommand('copy-code.previewSnippet', async (snippet: CodeSnippet) => {
+  let previewSnippet = vscode.commands.registerCommand('starcode-snippets.previewSnippet', async (snippet: CodeSnippet) => {
     if (!snippet) return
 
     const document = await vscode.workspace.openTextDocument({
@@ -95,7 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 重命名命令
-  let renameItem = vscode.commands.registerCommand('copy-code.rename', async (item: TreeItem) => {
+  let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: TreeItem) => {
     if (!item) return
 
     const newName = await vscode.window.showInputBox({
@@ -116,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 创建目录命令
-  let createDirectory = vscode.commands.registerCommand('copy-code.createDirectory', async () => {
+  let createDirectory = vscode.commands.registerCommand('starcode-snippets.createDirectory', async () => {
     const name = await vscode.window.showInputBox({
       prompt: '输入目录名',
       placeHolder: '新建目录',
@@ -135,7 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 在指定目录中创建代码片段命令
-  let createSnippetInDirectory = vscode.commands.registerCommand('copy-code.createSnippetInDirectory', async (item: TreeItem) => {
+  let createSnippetInDirectory = vscode.commands.registerCommand('starcode-snippets.createSnippetInDirectory', async (item: TreeItem) => {
     if (!item?.directory) return
 
     const name = await vscode.window.showInputBox({
@@ -169,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 删除命令
-  let deleteItem = vscode.commands.registerCommand('copy-code.delete', async (item: TreeItem) => {
+  let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: TreeItem) => {
     if (!item) return
 
     const confirmMessage = item.snippet
@@ -189,7 +189,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 追加粘贴命令
-  let appendCode = vscode.commands.registerCommand('copy-code.appendCode', async (item: TreeItem) => {
+  let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: TreeItem) => {
     if (!item?.snippet) return
 
     const editor = vscode.window.activeTextEditor
@@ -202,7 +202,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 编辑代码命令
-  let editSnippet = vscode.commands.registerCommand('copy-code.editSnippet', async (item: TreeItem) => {
+  let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: TreeItem) => {
     if (!item?.snippet) return
 
     const updatedSnippet = await SnippetEditor.edit(item.snippet)
@@ -213,7 +213,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 移动到目录命令
-  let moveToDirectory = vscode.commands.registerCommand('copy-code.moveToDirectory', async (item: TreeItem) => {
+  let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: TreeItem) => {
     if (!item?.snippet) return
 
     const directories = await storageManager.getAllDirectories()
@@ -238,7 +238,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   // 注册插入代码片段命令
-  let insertSnippetCommand = vscode.commands.registerCommand('copy-code.insertSnippet', async (snippet: CodeSnippet) => {
+  let insertSnippetCommand = vscode.commands.registerCommand('starcode-snippets.insertSnippet', async (snippet: CodeSnippet) => {
     await insertSnippet(snippet)
   })
 
