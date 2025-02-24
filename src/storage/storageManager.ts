@@ -13,20 +13,10 @@ export class StorageManager {
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context
-    
-    // 获取用户主目录（跨平台支持）
-    const homeDir = process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH
-    if (!homeDir) {
-      throw new Error('无法获取用户主目录')
-    }
-
-    // 在用户目录下创建 .starcode-snippets 文件夹
-    this.storagePath = vscode.Uri.file(homeDir + '/.starcode-snippets')
+    this.storagePath = context.globalStorageUri
     this.snippetsFile = vscode.Uri.joinPath(this.storagePath, 'snippets.json')
     this.directoriesFile = vscode.Uri.joinPath(this.storagePath, 'directories.json')
-    this.initializeStorage().catch(error => {
-      vscode.window.showErrorMessage(`初始化存储目录失败: ${error}`)
-    })
+    this.initializeStorage()
   }
 
   private async initializeStorage() {
