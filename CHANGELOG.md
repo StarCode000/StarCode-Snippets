@@ -4,6 +4,7 @@ All notable changes to the "StarCode Snippets" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+2025-02-24
 
-- Initial release
+- 新增删除和重命名目录功能
+- 代码片段保存在用户目录下

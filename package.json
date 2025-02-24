@@ -5,7 +5,7 @@
   "author": "StarCode000",
   "icon": "logo.png",
   "publisher": "StarCode000",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.97.0"
   },
