@@ -35,15 +35,11 @@ export class SnippetEditor {
                 async (message) => {
                     switch (message.command) {
                         case 'save':
-                            if (!isResolved) {
-                                isResolved = true;
-                                const updatedSnippet = {
-                                    ...snippet,
-                                    code: message.code
-                                };
-                                panel.dispose();
-                                resolve(updatedSnippet);
-                            }
+                            const updatedSnippet = {
+                                ...snippet,
+                                code: message.code
+                            };
+                            resolve(updatedSnippet);
                             break;
                         case 'cancel':
                             if (!isResolved) {
@@ -167,6 +163,26 @@ function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): strin
                     command: 'save',
                     code: code
                 });
+                // 显示保存成功提示
+                const messageContainerId = 'message-container';
+                let container = document.getElementById(messageContainerId);
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = messageContainerId;
+                    container.style.position = 'fixed';
+                    container.style.bottom = '60px';
+                    container.style.right = '20px';
+                    container.style.padding = '8px 16px';
+                    container.style.backgroundColor = 'var(--vscode-inputValidation-infoBackground)';
+                    container.style.color = 'var(--vscode-inputValidation-infoForeground)';
+                    container.style.borderRadius = '4px';
+                    container.style.zIndex = '1000';
+                    document.body.appendChild(container);
+                }
+                container.textContent = '保存成功';
+                setTimeout(() => {
+                    container.remove();
+                }, 2000);
             }
 
             function cancelEdit() {

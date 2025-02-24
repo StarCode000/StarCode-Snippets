@@ -90,6 +90,12 @@
           "light": "./src/assets/img/actions/move-black.svg",
           "dark": "./src/assets/img/actions/move-white.svg"
         }
+      },
+      {
+        "command": "copy-code.createSnippetInDirectory",
+        "title": "新建代码片段",
+        "category": "Copy Code",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -117,6 +123,11 @@
         {
           "command": "copy-code.moveToDirectory",
           "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "copy-code.createSnippetInDirectory",
+          "when": "view == copyCodeExplorer && viewItem == directory",
           "group": "inline"
         }
       ],
