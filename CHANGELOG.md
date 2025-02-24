@@ -7,3 +7,4 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 2025-02-24
 
 - 新增删除和重命名目录功能
+- 内置代码编辑器
