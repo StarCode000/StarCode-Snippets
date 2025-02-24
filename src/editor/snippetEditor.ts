@@ -1,11 +1,21 @@
 // src/editor/snippetEditor.ts
 import * as vscode from 'vscode';
 import { CodeSnippet } from '../models/types';
+import * as path from 'path';
 
 export class SnippetEditor {
     private static currentPanel: vscode.WebviewPanel | undefined;
+    private static extensionContext: vscode.ExtensionContext;
+
+    public static initialize(context: vscode.ExtensionContext) {
+        SnippetEditor.extensionContext = context;
+    }
 
     public static async edit(snippet: CodeSnippet): Promise<CodeSnippet | undefined> {
+        if (!SnippetEditor.extensionContext) {
+            throw new Error('SnippetEditor not initialized');
+        }
+
         // 如果已经有打开的面板，先关闭它
         if (SnippetEditor.currentPanel) {
             SnippetEditor.currentPanel.dispose();
@@ -18,7 +28,10 @@ export class SnippetEditor {
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(SnippetEditor.extensionContext.extensionUri, 'dist')
+                ]
             }
         );
 
@@ -28,7 +41,7 @@ export class SnippetEditor {
             let isResolved = false;
 
             // 设置webview的HTML内容
-            panel.webview.html = getWebviewContent(snippet);
+            panel.webview.html = getWebviewContent(panel.webview, snippet, SnippetEditor.extensionContext);
 
             // 处理webview发来的消息
             panel.webview.onDidReceiveMessage(
@@ -74,8 +87,16 @@ export class SnippetEditor {
     }
 }
 
-function getWebviewContent(snippet: CodeSnippet): string {
-    // 使用VSCode内置的Monaco编辑器
+function getWebviewContent(
+    webview: vscode.Webview,
+    snippet: CodeSnippet,
+    context: vscode.ExtensionContext
+): string {
+    // 获取本地Monaco编辑器资源的URI
+    const monacoBase = webview.asWebviewUri(
+        vscode.Uri.joinPath(context.extensionUri, 'dist', 'monaco-editor')
+    );
+
     return `<!DOCTYPE html>
     <html>
     <head>
@@ -122,27 +143,54 @@ function getWebviewContent(snippet: CodeSnippet): string {
             <button class="button" onclick="saveSnippet()">保存</button>
             <button class="button" onclick="cancelEdit()">取消</button>
         </div>
+        <script src="${monacoBase}/vs/loader.js"></script>
         <script>
             const vscode = acquireVsCodeApi();
-            
-            // 使用VSCode的webview API创建编辑器
-            const editor = {
-                element: document.getElementById('container'),
-                value: ${JSON.stringify(snippet.code)},
-                language: 'typescript'
+
+            // 配置Monaco加载器
+            require.config({
+                paths: { vs: '${monacoBase}/vs' }
+            });
+
+            // 配置Monaco环境
+            window.MonacoEnvironment = {
+                getWorkerUrl: function(workerId, label) {
+                    return '${monacoBase}/vs/base/worker/workerMain.js';
+                }
             };
 
-            // 通知VSCode创建编辑器
-            vscode.postMessage({
-                command: 'createEditor',
-                value: editor.value,
-                language: editor.language
+            let editor;
+            require(['vs/editor/editor.main'], function() {
+                editor = monaco.editor.create(document.getElementById('container'), {
+                    value: ${JSON.stringify(snippet.code)},
+                    language: 'typescript',
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    minimap: {
+                        enabled: false
+                    },
+                    scrollBeyondLastLine: false,
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    renderLineHighlight: 'all',
+                    roundedSelection: false,
+                    selectOnLineNumbers: true,
+                    wordWrap: 'on'
+                });
+
+                // 添加快捷键支持
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveSnippet);
+                editor.addCommand(monaco.KeyCode.Escape, cancelEdit);
+
+                // 自动聚焦编辑器
+                editor.focus();
             });
 
             function saveSnippet() {
+                const code = editor.getValue();
                 vscode.postMessage({
                     command: 'save',
-                    code: editor.value
+                    code: code
                 });
                 showSaveSuccess();
             }
@@ -175,13 +223,10 @@ function getWebviewContent(snippet: CodeSnippet): string {
                 }, 2000);
             }
 
-            // 监听来自VSCode的消息
-            window.addEventListener('message', event => {
-                const message = event.data;
-                switch (message.command) {
-                    case 'updateValue':
-                        editor.value = message.value;
-                        break;
+            // 处理窗口大小变化
+            window.addEventListener('resize', () => {
+                if (editor) {
+                    editor.layout();
                 }
             });
         </script>
