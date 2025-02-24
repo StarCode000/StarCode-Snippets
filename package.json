@@ -5,7 +5,7 @@
   "author": "StarCode000",
   "icon": "logo.png",
   "publisher": "StarCode000",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -126,6 +126,16 @@
         },
         {
           "command": "starcode-snippets.createSnippetInDirectory",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.rename",
           "when": "view == copyCodeExplorer && viewItem == directory",
           "group": "inline"
         }
