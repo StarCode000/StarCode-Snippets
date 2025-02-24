@@ -5,6 +5,10 @@
   "author": "StarCode000",
   "icon": "logo.png",
   "publisher": "StarCode000",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/chu-jianghan/starcode-snippets.git"
+  },
   "version": "0.0.3",
   "engines": {
     "vscode": "^1.97.0"
