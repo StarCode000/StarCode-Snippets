@@ -14,7 +14,6 @@
     "Snippets"
   ],
   "activationEvents": [
-    "onView:copyCodeExplorer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -45,61 +44,80 @@
       {
         "command": "copy-code.rename",
         "title": "重命名",
-        "category": "Copy Code"
+        "category": "Copy Code",
+        "icon": {
+          "light": "./src/assets/img/actions/rename-black.svg",
+          "dark": "./src/assets/img/actions/rename -white.svg"
+        }
       },
       {
         "command": "copy-code.createDirectory",
         "title": "新建目录",
-        "category": "Copy Code",
-        "icon": "$(add)"
+        "category": "Copy Code"
       },
       {
         "command": "copy-code.appendCode",
         "title": "粘贴代码",
-        "category": "Copy Code"
+        "category": "Copy Code",
+        "icon": {
+          "light": "./src/assets/img/actions/paste-black.svg",
+          "dark": "./src/assets/img/actions/paste-white.svg"
+        }
       },
       {
         "command": "copy-code.editSnippet",
         "title": "编辑代码",
-        "category": "Copy Code"
+        "category": "Copy Code",
+        "icon": {
+          "light": "./src/assets/img/actions/edit-black.svg",
+          "dark": "./src/assets/img/actions/edit-white.svg"
+        }
       },
       {
         "command": "copy-code.delete",
         "title": "删除",
-        "category": "Copy Code"
+        "category": "Copy Code",
+        "icon": {
+          "light": "./src/assets/img/actions/delete-black.svg",
+          "dark": "./src/assets/img/actions/delete-white.svg"
+        }
       },
       {
         "command": "copy-code.moveToDirectory",
         "title": "移动到目录",
-        "category": "Copy Code"
+        "category": "Copy Code",
+        "icon": {
+          "light": "./src/assets/img/actions/move-black.svg",
+          "dark": "./src/assets/img/actions/move-white.svg"
+        }
       }
     ],
     "menus": {
       "view/item/context": [
         {
-          "command": "copy-code.rename",
-          "when": "view == copyCodeExplorer",
-          "group": "1_modification"
-        },
-        {
           "command": "copy-code.appendCode",
           "when": "view == copyCodeExplorer && viewItem == snippet",
-          "group": "2_operation"
+          "group": "inline"
+        },
+        {
+          "command": "copy-code.rename",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
         },
         {
           "command": "copy-code.editSnippet",
           "when": "view == copyCodeExplorer && viewItem == snippet",
-          "group": "2_operation"
+          "group": "inline"
+        },
+        {
+          "command": "copy-code.delete",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
         },
         {
           "command": "copy-code.moveToDirectory",
           "when": "view == copyCodeExplorer && viewItem == snippet",
-          "group": "3_organization"
-        },
-        {
-          "command": "copy-code.delete",
-          "when": "view == copyCodeExplorer",
-          "group": "9_deletion"
+          "group": "inline"
         }
       ],
       "view/title": [
@@ -121,7 +139,8 @@
       "untrustedWorkspaces": {
         "supported": true
       },
-      "virtualWorkspaces": true
+      "virtualWorkspaces": true,
+      "treeItemButtons": true
     }
   },
   "scripts": {

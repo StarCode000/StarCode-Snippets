@@ -79,6 +79,27 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
   public getDragAndDropController(): vscode.TreeDragAndDropController<any> {
     return this.dragAndDropController
   }
+
+  // 实现getParent方法
+  async getParent(element: TreeItem): Promise<TreeItem | undefined> {
+    if (!element) return undefined;
+
+    if (element.snippet && element.snippet.parentId) {
+      // 如果是代码片段且有父目录
+      const directories = await this.storageManager.getAllDirectories();
+      const parentDir = directories.find(dir => dir.id === element.snippet!.parentId);
+      if (parentDir) {
+        return new TreeItem(
+          parentDir.name,
+          vscode.TreeItemCollapsibleState.Expanded,
+          undefined,
+          parentDir
+        );
+      }
+    }
+    // 根级别的项目返回undefined
+    return undefined;
+  }
 }
 
 export class TreeItem extends vscode.TreeItem {
@@ -98,11 +119,6 @@ export class TreeItem extends vscode.TreeItem {
 
     if (snippet) {
       this.tooltip = `${snippet.fileName}\n${snippet.filePath}`
-      this.command = {
-        command: 'copy-code.previewSnippet',
-        title: 'Preview Snippet',
-        arguments: [snippet],
-      }
       // 设置代码片段图标
       this.iconPath = new vscode.ThemeIcon('symbol-variable')
     } else if (directory) {
