@@ -1,0 +1,201 @@
+{
+  "name": "starcode-snippets",
+  "displayName": "StarCode Snippets",
+  "description": "A VSCode plugin for saving, organizing and reusing code snippets.",
+  "author": "StarCode000",
+  "icon": "logo.png",
+  "publisher": "StarCode000",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StarCode000/StarCode-Snippets"
+  },
+  "version": "0.0.4",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Snippets"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "starcode-snippets-container",
+          "title": "StarCode Snippets",
+          "icon": "./icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "starcode-snippets-container": [
+        {
+          "id": "copyCodeExplorer",
+          "name": "代码库",
+          "type": "tree"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "starcode-snippets.saveToLibrary",
+        "title": "📸 保存至代码库(StarCode Snippets)",
+        "category": "StarCode Snippets"
+      },
+      {
+        "command": "starcode-snippets.rename",
+        "title": "重命名",
+        "category": "StarCode Snippets",
+        "icon": {
+          "light": "./assets/img/actions/rename-black.png",
+          "dark": "./assets/img/actions/rename-white.png"
+        }
+      },
+      {
+        "command": "starcode-snippets.createDirectory",
+        "title": "新建目录",
+        "category": "StarCode Snippets"
+      },
+      {
+        "command": "starcode-snippets.appendCode",
+        "title": "粘贴代码",
+        "category": "StarCode Snippets",
+        "icon": {
+          "light": "./assets/img/actions/paste-black.png",
+          "dark": "./assets/img/actions/paste-white.png"
+        }
+      },
+      {
+        "command": "starcode-snippets.editSnippet",
+        "title": "编辑代码",
+        "category": "StarCode Snippets",
+        "icon": {
+          "light": "./assets/img/actions/edit-black.png",
+          "dark": "./assets/img/actions/edit-white.png"
+        }
+      },
+      {
+        "command": "starcode-snippets.delete",
+        "title": "删除",
+        "category": "StarCode Snippets",
+        "icon": {
+          "light": "./assets/img/actions/delete-black.png",
+          "dark": "./assets/img/actions/delete-white.png"
+        }
+      },
+      {
+        "command": "starcode-snippets.moveToDirectory",
+        "title": "移动到目录",
+        "category": "StarCode Snippets",
+        "icon": {
+          "light": "./assets/img/actions/move-black.png",
+          "dark": "./assets/img/actions/move-white.png"
+        }
+      },
+      {
+        "command": "starcode-snippets.createSnippetInDirectory",
+        "title": "新建代码片段",
+        "category": "StarCode Snippets",
+        "icon": "$(add)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "starcode-snippets.appendCode",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.rename",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.editSnippet",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.moveToDirectory",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.createSnippetInDirectory",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.rename",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "starcode-snippets.createDirectory",
+          "when": "view == copyCodeExplorer",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "starcode-snippets.saveToLibrary",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste"
+        }
+      ]
+    },
+    "capabilities": {
+      "untrustedWorkspaces": {
+        "supported": true
+      },
+      "virtualWorkspaces": true,
+      "treeItemButtons": true
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.97.0",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "eslint": "^9.19.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.7.3",
+    "webpack": "5.75.0",
+    "webpack-cli": "5.0.1"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.2",
+    "uuid": "^11.1.0"
+  }
+}
