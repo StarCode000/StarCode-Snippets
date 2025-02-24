@@ -1,11 +1,21 @@
 // src/editor/snippetEditor.ts
 import * as vscode from 'vscode';
 import { CodeSnippet } from '../models/types';
+import * as path from 'path';
 
 export class SnippetEditor {
     private static currentPanel: vscode.WebviewPanel | undefined;
+    private static extensionContext: vscode.ExtensionContext;
+
+    public static initialize(context: vscode.ExtensionContext) {
+        SnippetEditor.extensionContext = context;
+    }
 
     public static async edit(snippet: CodeSnippet): Promise<CodeSnippet | undefined> {
+        if (!SnippetEditor.extensionContext) {
+            throw new Error('SnippetEditor not initialized');
+        }
+
         // 如果已经有打开的面板，先关闭它
         if (SnippetEditor.currentPanel) {
             SnippetEditor.currentPanel.dispose();
@@ -19,6 +29,9 @@ export class SnippetEditor {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(SnippetEditor.extensionContext.extensionUri, 'dist')
+                ]
             }
         );
 
@@ -28,7 +41,7 @@ export class SnippetEditor {
             let isResolved = false;
 
             // 设置webview的HTML内容
-            panel.webview.html = getWebviewContent(panel.webview, snippet);
+            panel.webview.html = getWebviewContent(panel.webview, snippet, SnippetEditor.extensionContext);
 
             // 处理webview发来的消息
             panel.webview.onDidReceiveMessage(
@@ -74,9 +87,15 @@ export class SnippetEditor {
     }
 }
 
-function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
-    // 获取Monaco编辑器的CDN URL
-    const monacoBaseUrl = 'https://cdn.bootcdn.net/ajax/libs/monaco-editor/0.52.2/min/vs';
+function getWebviewContent(
+    webview: vscode.Webview,
+    snippet: CodeSnippet,
+    context: vscode.ExtensionContext
+): string {
+    // 获取本地Monaco编辑器资源的URI
+    const monacoBase = webview.asWebviewUri(
+        vscode.Uri.joinPath(context.extensionUri, 'dist', 'monaco-editor')
+    );
 
     return `<!DOCTYPE html>
     <html>
@@ -124,9 +143,21 @@ function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): strin
             <button class="button" onclick="saveSnippet()">保存</button>
             <button class="button" onclick="cancelEdit()">取消</button>
         </div>
-        <script src="${monacoBaseUrl}/loader.js"></script>
+        <script src="${monacoBase}/vs/loader.js"></script>
         <script>
-            require.config({ paths: { vs: '${monacoBaseUrl}' }});
+            const vscode = acquireVsCodeApi();
+
+            // 配置Monaco加载器
+            require.config({
+                paths: { vs: '${monacoBase}/vs' }
+            });
+
+            // 配置Monaco环境
+            window.MonacoEnvironment = {
+                getWorkerUrl: function(workerId, label) {
+                    return '${monacoBase}/vs/base/worker/workerMain.js';
+                }
+            };
 
             let editor;
             require(['vs/editor/editor.main'], function() {
@@ -155,15 +186,22 @@ function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): strin
                 editor.focus();
             });
 
-            const vscode = acquireVsCodeApi();
-
             function saveSnippet() {
                 const code = editor.getValue();
                 vscode.postMessage({
                     command: 'save',
                     code: code
                 });
-                // 显示保存成功提示
+                showSaveSuccess();
+            }
+
+            function cancelEdit() {
+                vscode.postMessage({
+                    command: 'cancel'
+                });
+            }
+
+            function showSaveSuccess() {
                 const messageContainerId = 'message-container';
                 let container = document.getElementById(messageContainerId);
                 if (!container) {
@@ -183,12 +221,6 @@ function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): strin
                 setTimeout(() => {
                     container.remove();
                 }, 2000);
-            }
-
-            function cancelEdit() {
-                vscode.postMessage({
-                    command: 'cancel'
-                });
             }
 
             // 处理窗口大小变化

@@ -7,6 +7,9 @@ import { CodeSnippet, Directory } from './models/types'
 import { SnippetEditor } from './editor/snippetEditor'
 
 export function activate(context: vscode.ExtensionContext) {
+  // 初始化SnippetEditor
+  SnippetEditor.initialize(context);
+
   const storageManager = new StorageManager(context)
   const treeDataProvider = new CopyCodeTreeDataProvider(storageManager)
 
