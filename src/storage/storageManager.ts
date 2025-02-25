@@ -23,25 +23,19 @@ export class StorageManager {
     try {
       // 创建存储目录
       await vscode.workspace.fs.createDirectory(this.storagePath)
-      
+
       // 初始化snippets.json（如果不存在）
       try {
         await vscode.workspace.fs.stat(this.snippetsFile)
       } catch {
-        await vscode.workspace.fs.writeFile(
-          this.snippetsFile,
-          Buffer.from(JSON.stringify([], null, 2))
-        )
+        await vscode.workspace.fs.writeFile(this.snippetsFile, Buffer.from(JSON.stringify([], null, 2)))
       }
 
       // 初始化directories.json（如果不存在）
       try {
         await vscode.workspace.fs.stat(this.directoriesFile)
       } catch {
-        await vscode.workspace.fs.writeFile(
-          this.directoriesFile,
-          Buffer.from(JSON.stringify([], null, 2))
-        )
+        await vscode.workspace.fs.writeFile(this.directoriesFile, Buffer.from(JSON.stringify([], null, 2)))
       }
     } catch (error) {
       vscode.window.showErrorMessage(`初始化存储失败: ${error}`)
@@ -71,7 +65,7 @@ export class StorageManager {
 
   // 延迟函数
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   // 带重试的文件读取
@@ -89,24 +83,14 @@ export class StorageManager {
   }
 
   // 带重试的文件写入
-  private async writeFileWithRetry(
-    file: vscode.Uri,
-    data: any,
-    retries = this.maxRetries
-  ): Promise<void> {
-    const tempFile = vscode.Uri.joinPath(
-      this.storagePath,
-      `${file.path.split('/').pop()}.tmp`
-    )
+  private async writeFileWithRetry(file: vscode.Uri, data: any, retries = this.maxRetries): Promise<void> {
+    const tempFile = vscode.Uri.joinPath(this.storagePath, `${file.path.split('/').pop()}.tmp`)
 
     try {
       await this.acquireLock()
-      
+
       // 写入临时文件
-      await vscode.workspace.fs.writeFile(
-        tempFile,
-        Buffer.from(JSON.stringify(data, null, 2))
-      )
+      await vscode.workspace.fs.writeFile(tempFile, Buffer.from(JSON.stringify(data, null, 2)))
 
       // 验证临时文件
       const tempContent = await this.readFileWithRetry(tempFile)
@@ -136,7 +120,7 @@ export class StorageManager {
   // 获取所有代码片段
   public async getAllSnippets(): Promise<CodeSnippet[]> {
     try {
-      return await this.readFileWithRetry(this.snippetsFile) || []
+      return (await this.readFileWithRetry(this.snippetsFile)) || []
     } catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
         return []
@@ -150,7 +134,7 @@ export class StorageManager {
   public async saveSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      if (snippets.some(s => s.id === snippet.id)) {
+      if (snippets.some((s) => s.id === snippet.id)) {
         throw new Error('代码片段ID已存在')
       }
       snippets.push(snippet)
@@ -195,7 +179,7 @@ export class StorageManager {
   // 获取所有目录
   public async getAllDirectories(): Promise<Directory[]> {
     try {
-      return await this.readFileWithRetry(this.directoriesFile) || []
+      return (await this.readFileWithRetry(this.directoriesFile)) || []
     } catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
         return []
@@ -209,7 +193,7 @@ export class StorageManager {
   public async createDirectory(directory: Directory): Promise<void> {
     try {
       const directories = await this.getAllDirectories()
-      if (directories.some(d => d.id === directory.id)) {
+      if (directories.some((d) => d.id === directory.id)) {
         throw new Error('目录ID已存在')
       }
       directories.push(directory)

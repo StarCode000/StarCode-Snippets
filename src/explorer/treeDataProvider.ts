@@ -29,34 +29,25 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
       // 根级别：显示目录和未分类的代码片段
       const [directories, snippets] = await Promise.all([
         this.storageManager.getAllDirectories(),
-        this.storageManager.getAllSnippets()
+        this.storageManager.getAllSnippets(),
       ])
 
       const items: TreeItem[] = []
 
       // 添加目录
       directories
-        .filter(dir => dir.parentId === null)
+        .filter((dir) => dir.parentId === null)
         .sort((a, b) => a.order - b.order)
-        .forEach(dir => {
-          items.push(new TreeItem(
-            dir.name,
-            vscode.TreeItemCollapsibleState.Expanded,
-            undefined,
-            dir
-          ))
+        .forEach((dir) => {
+          items.push(new TreeItem(dir.name, vscode.TreeItemCollapsibleState.Expanded, undefined, dir))
         })
 
       // 添加根级别的代码片段
       snippets
-        .filter(snippet => snippet.parentId === null)
+        .filter((snippet) => snippet.parentId === null)
         .sort((a, b) => a.order - b.order)
-        .forEach(snippet => {
-          items.push(new TreeItem(
-            snippet.name,
-            vscode.TreeItemCollapsibleState.None,
-            snippet
-          ))
+        .forEach((snippet) => {
+          items.push(new TreeItem(snippet.name, vscode.TreeItemCollapsibleState.None, snippet))
         })
 
       return items
@@ -64,13 +55,9 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
       // 目录内容：显示该目录下的代码片段
       const snippets = await this.storageManager.getAllSnippets()
       return snippets
-        .filter(snippet => snippet.parentId === element.directory!.id)
+        .filter((snippet) => snippet.parentId === element.directory!.id)
         .sort((a, b) => a.order - b.order)
-        .map(snippet => new TreeItem(
-          snippet.name,
-          vscode.TreeItemCollapsibleState.None,
-          snippet
-        ))
+        .map((snippet) => new TreeItem(snippet.name, vscode.TreeItemCollapsibleState.None, snippet))
     }
 
     return []
@@ -82,23 +69,18 @@ export class CopyCodeTreeDataProvider implements vscode.TreeDataProvider<TreeIte
 
   // 实现getParent方法
   async getParent(element: TreeItem): Promise<TreeItem | undefined> {
-    if (!element) return undefined;
+    if (!element) return undefined
 
     if (element.snippet && element.snippet.parentId) {
       // 如果是代码片段且有父目录
-      const directories = await this.storageManager.getAllDirectories();
-      const parentDir = directories.find(dir => dir.id === element.snippet!.parentId);
+      const directories = await this.storageManager.getAllDirectories()
+      const parentDir = directories.find((dir) => dir.id === element.snippet!.parentId)
       if (parentDir) {
-        return new TreeItem(
-          parentDir.name,
-          vscode.TreeItemCollapsibleState.Expanded,
-          undefined,
-          parentDir
-        );
+        return new TreeItem(parentDir.name, vscode.TreeItemCollapsibleState.Expanded, undefined, parentDir)
       }
     }
     // 根级别的项目返回undefined
-    return undefined;
+    return undefined
   }
 }
 

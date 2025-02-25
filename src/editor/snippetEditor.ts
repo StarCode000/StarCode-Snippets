@@ -1,107 +1,93 @@
 // src/editor/snippetEditor.ts
-import * as vscode from 'vscode';
-import { CodeSnippet } from '../models/types';
-import * as path from 'path';
+import * as vscode from 'vscode'
+import { CodeSnippet } from '../models/types'
 
 export class SnippetEditor {
-    private static currentPanel: vscode.WebviewPanel | undefined;
-    private static extensionContext: vscode.ExtensionContext;
+  private static currentPanel: vscode.WebviewPanel | undefined
+  private static extensionContext: vscode.ExtensionContext
 
-    public static initialize(context: vscode.ExtensionContext) {
-        SnippetEditor.extensionContext = context;
+  public static initialize(context: vscode.ExtensionContext) {
+    SnippetEditor.extensionContext = context
+  }
+
+  public static async edit(snippet: CodeSnippet): Promise<CodeSnippet | undefined> {
+    if (!SnippetEditor.extensionContext) {
+      throw new Error('SnippetEditor not initialized')
     }
 
-    public static async edit(snippet: CodeSnippet): Promise<CodeSnippet | undefined> {
-        if (!SnippetEditor.extensionContext) {
-            throw new Error('SnippetEditor not initialized');
-        }
-
-        // 如果已经有打开的面板，先关闭它
-        if (SnippetEditor.currentPanel) {
-            SnippetEditor.currentPanel.dispose();
-        }
-
-        // 创建新的webview面板
-        const panel = vscode.window.createWebviewPanel(
-            'snippetEditor',
-            `编辑: ${snippet.name}`,
-            vscode.ViewColumn.One,
-            {
-                enableScripts: true,
-                retainContextWhenHidden: true,
-                localResourceRoots: [
-                    vscode.Uri.joinPath(SnippetEditor.extensionContext.extensionUri, 'dist')
-                ]
-            }
-        );
-
-        SnippetEditor.currentPanel = panel;
-
-        return new Promise<CodeSnippet | undefined>((resolve, reject) => {
-            let isResolved = false;
-
-            // 设置webview的HTML内容
-            panel.webview.html = getWebviewContent(panel.webview, snippet, SnippetEditor.extensionContext);
-
-            // 处理webview发来的消息
-            panel.webview.onDidReceiveMessage(
-                async (message) => {
-                    switch (message.command) {
-                        case 'save':
-                            const updatedSnippet = {
-                                ...snippet,
-                                code: message.code,
-                                language: message.language
-                            };
-                            resolve(updatedSnippet);
-                            break;
-                        case 'cancel':
-                            if (!isResolved) {
-                                isResolved = true;
-                                panel.dispose();
-                                resolve(undefined);
-                            }
-                            break;
-                    }
-                },
-                undefined,
-                []
-            );
-
-            // 处理面板关闭事件
-            panel.onDidDispose(() => {
-                if (!isResolved) {
-                    isResolved = true;
-                    resolve(undefined);
-                }
-            });
-
-            // 设置超时（5分钟）
-            const timeout = setTimeout(() => {
-                if (!isResolved) {
-                    isResolved = true;
-                    panel.dispose();
-                    reject(new Error('编辑会话超时'));
-                }
-            }, 5 * 60 * 1000);
-        });
+    // 如果已经有打开的面板，先关闭它
+    if (SnippetEditor.currentPanel) {
+      SnippetEditor.currentPanel.dispose()
     }
+
+    // 创建新的webview面板
+    const panel = vscode.window.createWebviewPanel('snippetEditor', `编辑: ${snippet.name}`, vscode.ViewColumn.One, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(SnippetEditor.extensionContext.extensionUri, 'dist')],
+    })
+
+    SnippetEditor.currentPanel = panel
+
+    return new Promise<CodeSnippet | undefined>((resolve, reject) => {
+      let isResolved = false
+
+      // 设置webview的HTML内容
+      panel.webview.html = getWebviewContent(panel.webview, snippet, SnippetEditor.extensionContext)
+
+      // 处理webview发来的消息
+      panel.webview.onDidReceiveMessage(
+        async (message) => {
+          switch (message.command) {
+            case 'save':
+              const updatedSnippet = {
+                ...snippet,
+                code: message.code,
+                language: message.language,
+              }
+              resolve(updatedSnippet)
+              break
+            case 'cancel':
+              if (!isResolved) {
+                isResolved = true
+                panel.dispose()
+                resolve(undefined)
+              }
+              break
+          }
+        },
+        undefined,
+        []
+      )
+
+      // 处理面板关闭事件
+      panel.onDidDispose(() => {
+        if (!isResolved) {
+          isResolved = true
+          resolve(undefined)
+        }
+      })
+
+      // 设置超时（5分钟）
+      const timeout = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true
+          panel.dispose()
+          reject(new Error('编辑会话超时'))
+        }
+      }, 5 * 60 * 1000)
+    })
+  }
 }
 
-function getWebviewContent(
-    webview: vscode.Webview,
-    snippet: CodeSnippet,
-    context: vscode.ExtensionContext
-): string {
-    // 获取本地Monaco编辑器资源的URI
-    const monacoBase = webview.asWebviewUri(
-        vscode.Uri.joinPath(context.extensionUri, 'dist', 'monaco-editor')
-    );
-    
-    // 使用Base64编码代码片段，避免HTML解析问题
-    const encodedCode = Buffer.from(snippet.code).toString('base64');
+function getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet, context: vscode.ExtensionContext): string {
+  // 获取本地Monaco编辑器资源的URI
+  const monacoBase = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'monaco-editor'))
 
-    return `<!DOCTYPE html>
+  // 使用Base64编码代码片段，避免HTML解析问题
+  const encodedCode = Buffer.from(snippet.code).toString('base64')
+
+  return `<!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
@@ -400,5 +386,5 @@ function getWebviewContent(
             });
         </script>
     </body>
-    </html>`;
+    </html>`
 }
