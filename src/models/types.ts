@@ -9,6 +9,7 @@ export interface CodeSnippet {
   parentId: string | null // 用于目录结构
   order: number
   createTime: number
+  language?: string // 代码语言，可选属性
 }
 
 export interface Directory {

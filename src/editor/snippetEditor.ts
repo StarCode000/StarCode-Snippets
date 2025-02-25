@@ -50,7 +50,8 @@ export class SnippetEditor {
                         case 'save':
                             const updatedSnippet = {
                                 ...snippet,
-                                code: message.code
+                                code: message.code,
+                                language: message.language
                             };
                             resolve(updatedSnippet);
                             break;
@@ -140,6 +141,29 @@ function getWebviewContent(
     <body>
         <div id="container"></div>
         <div id="toolbar">
+            <div style="display: flex; align-items: center; margin-right: 16px;">
+                <label style="margin-right: 8px; color: var(--vscode-foreground);">语言:</label>
+                <select id="languageSelect" style="background-color: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); padding: 4px 8px; border-radius: 2px;">
+                    <option value="plaintext">纯文本</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="html">HTML</option>
+                    <option value="css">CSS</option>
+                    <option value="json">JSON</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="csharp">C#</option>
+                    <option value="cpp">C++</option>
+                    <option value="go">Go</option>
+                    <option value="php">PHP</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="rust">Rust</option>
+                    <option value="sql">SQL</option>
+                    <option value="markdown">Markdown</option>
+                    <option value="yaml">YAML</option>
+                    <option value="shell">Shell</option>
+                </select>
+            </div>
             <button class="button" onclick="saveSnippet()">保存</button>
             <button class="button" onclick="cancelEdit()">取消</button>
         </div>
@@ -160,10 +184,23 @@ function getWebviewContent(
             };
 
             let editor;
+            let currentLanguage = ${JSON.stringify(snippet.language || 'typescript')};
+            
             require(['vs/editor/editor.main'], function() {
+                // 全局禁用验证
+                monaco.editor.onDidCreateModel(model => {
+                    // 为所有创建的模型禁用验证
+                    monaco.editor.setModelMarkers(model, model.getLanguageId(), []);
+                });
+                
+                // 配置编辑器默认选项
+                monaco.editor.EditorOptions.quickSuggestions.defaultValue = false;
+                monaco.editor.EditorOptions.suggestOnTriggerCharacters.defaultValue = false;
+                monaco.editor.EditorOptions.snippetSuggestions.defaultValue = 'none';
+                monaco.editor.EditorOptions.suggest.defaultValue = { showIcons: false, filterGraceful: false, showMethods: false, showFunctions: false, showConstructors: false, showFields: false, showVariables: false, showClasses: false, showStructs: false, showInterfaces: false, showModules: false, showProperties: false, showEvents: false, showOperators: false, showUnits: false, showValues: false, showConstants: false, showEnums: false, showEnumMembers: false, showKeywords: false, showWords: false, showColors: false, showFiles: false, showReferences: false, showFolders: false, showTypeParameters: false, showIssues: false, showUsers: false };
                 editor = monaco.editor.create(document.getElementById('container'), {
                     value: ${JSON.stringify(snippet.code)},
-                    language: 'typescript',
+                    language: currentLanguage,
                     theme: 'vs-dark',
                     automaticLayout: true,
                     minimap: {
@@ -177,6 +214,20 @@ function getWebviewContent(
                     selectOnLineNumbers: true,
                     wordWrap: 'on'
                 });
+                
+                // 关闭代码验证和错误提示
+                monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+                    noSemanticValidation: true,
+                    noSyntaxValidation: true
+                });
+                
+                monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+                    noSemanticValidation: true,
+                    noSyntaxValidation: true
+                });
+                
+                // 为所有语言禁用验证
+                monaco.editor.setModelMarkers(editor.getModel(), currentLanguage, []);
 
                 // 添加快捷键支持
                 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveSnippet);
@@ -184,13 +235,39 @@ function getWebviewContent(
 
                 // 自动聚焦编辑器
                 editor.focus();
+                
+                // 设置语言选择器的初始值
+                const languageSelect = document.getElementById('languageSelect');
+                languageSelect.value = currentLanguage;
+                
+                // 监听语言选择变化
+                languageSelect.addEventListener('change', function() {
+                    currentLanguage = this.value;
+                    monaco.editor.setModelLanguage(editor.getModel(), currentLanguage);
+                    
+                    // 切换语言后也清除错误标记
+                    monaco.editor.setModelMarkers(editor.getModel(), currentLanguage, []);
+                    
+                    // 对特定语言应用额外的禁用验证设置
+                    if (currentLanguage === 'javascript' || currentLanguage === 'typescript') {
+                        const defaults = currentLanguage === 'javascript'
+                            ? monaco.languages.typescript.javascriptDefaults
+                            : monaco.languages.typescript.typescriptDefaults;
+                            
+                        defaults.setDiagnosticsOptions({
+                            noSemanticValidation: true,
+                            noSyntaxValidation: true
+                        });
+                    }
+                });
             });
 
             function saveSnippet() {
                 const code = editor.getValue();
                 vscode.postMessage({
                     command: 'save',
-                    code: code
+                    code: code,
+                    language: currentLanguage
                 });
                 showSaveSuccess();
             }
