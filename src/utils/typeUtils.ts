@@ -19,15 +19,18 @@ export const isMap = (value: any): value is Map<any, any> => value instanceof Ma
 export const isSet = (value: any): value is Set<any> => value instanceof Set
 
 export function isDirectory(item: any): item is Directory {
-  return item && 
+  return (
+    item &&
     typeof item.id === 'string' &&
     typeof item.name === 'string' &&
     (item.parentId === null || typeof item.parentId === 'string') &&
-    typeof item.order === 'number';
+    typeof item.order === 'number'
+  )
 }
 
 export function isCodeSnippet(item: any): item is CodeSnippet {
-  return item &&
+  return (
+    item &&
     typeof item.id === 'string' &&
     typeof item.name === 'string' &&
     typeof item.code === 'string' &&
@@ -36,5 +39,6 @@ export function isCodeSnippet(item: any): item is CodeSnippet {
     typeof item.category === 'string' &&
     (item.parentId === null || typeof item.parentId === 'string') &&
     typeof item.order === 'number' &&
-    typeof item.createTime === 'number';
+    typeof item.createTime === 'number'
+  )
 }
