@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.0.5",
+  "version": "0.0.6",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -42,6 +42,12 @@
         "command": "starcode-snippets.saveToLibrary",
         "title": "📸 保存至代码库(StarCode Snippets)",
         "category": "StarCode Snippets"
+      },
+      {
+        "command": "starcode-snippets.refreshExplorer",
+        "title": "刷新",
+        "category": "StarCode Snippets",
+        "icon": "$(refresh)"
       },
       {
         "command": "starcode-snippets.rename",
@@ -145,9 +151,14 @@
       ],
       "view/title": [
         {
+          "command": "starcode-snippets.refreshExplorer",
+          "when": "view == copyCodeExplorer",
+          "group": "navigation@1"
+        },
+        {
           "command": "starcode-snippets.createDirectory",
           "when": "view == copyCodeExplorer",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "editor/context": [

@@ -1,10 +1,13 @@
 # Change Log
 
-All notable changes to the "StarCode Snippets" extension will be documented in this file.
+### 2025-02-24
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+* 新增删除和重命名目录功能
+* 内置代码编辑器
 
-2025-02-24
+### 2025-02-25
 
-- 新增删除和重命名目录功能
-- 内置代码编辑器
+* 代码编辑器禁用语法检查
+* 代码编辑器新增语言切换功能
+
+* 代码库新增刷新按钮

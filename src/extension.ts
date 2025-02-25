@@ -245,6 +245,13 @@ export function activate(context: vscode.ExtensionContext) {
     await insertSnippet(snippet)
   })
 
+  // 注册刷新树视图命令
+  let refreshExplorer = vscode.commands.registerCommand('starcode-snippets.refreshExplorer', () => {
+    // 重新加载所有代码片段数据
+    treeDataProvider.refresh();
+    vscode.window.showInformationMessage('代码库已刷新');
+  });
+
   // 注册所有命令
   context.subscriptions.push(
     saveToLibrary,
@@ -257,6 +264,7 @@ export function activate(context: vscode.ExtensionContext) {
     moveToDirectory,
     insertSnippetCommand,
     createSnippetInDirectory,
+    refreshExplorer,
     treeView
   )
 }
