@@ -67,6 +67,58 @@ export function activate(context: vscode.ExtensionContext) {
         })
 
         if (selectedDirectory) {
+          // 根据文件扩展名或内容自动检测语言
+          let language = 'plaintext'
+          
+          // 从文件扩展名检测语言
+          const fileExt = fileName.split('.').pop()?.toLowerCase()
+          if (fileExt) {
+            switch (fileExt) {
+              case 'ts': language = 'typescript'; break
+              case 'js': language = 'javascript'; break
+              case 'html': language = 'html'; break
+              case 'css': language = 'css'; break
+              case 'json': language = 'json'; break
+              case 'vue': language = 'vue'; break
+              case 'py': language = 'python'; break
+              case 'java': language = 'java'; break
+              case 'cs': language = 'csharp'; break
+              case 'cpp': case 'c': case 'h': language = 'cpp'; break
+              case 'go': language = 'go'; break
+              case 'php': language = 'php'; break
+              case 'rb': language = 'ruby'; break
+              case 'rs': language = 'rust'; break
+              case 'sql': language = 'sql'; break
+              case 'md': language = 'markdown'; break
+              case 'yml': case 'yaml': language = 'yaml'; break
+              case 'sh': case 'bash': language = 'shell'; break
+            }
+          }
+          
+          // 如果没有从文件扩展名检测到语言，尝试从内容检测
+          if (language === 'plaintext') {
+            // 检测Vue文件
+            if (code.includes('<template>') &&
+                (code.includes('<script>') || code.includes('<script setup'))) {
+              language = 'vue'
+            }
+            // 检测HTML文件
+            else if (code.includes('<!DOCTYPE html>') ||
+                    (code.includes('<html') && code.includes('<body'))) {
+              language = 'html'
+            }
+            // 检测JavaScript/TypeScript文件
+            else if (code.includes('function') || code.includes('const ') ||
+                    code.includes('let ') || code.includes('class ')) {
+              if (code.includes(': string') || code.includes(': number') ||
+                  code.includes(': boolean') || code.includes('interface ')) {
+                language = 'typescript'
+              } else {
+                language = 'javascript'
+              }
+            }
+          }
+          
           const snippet: CodeSnippet = {
             id: uuidv4(),
             name,
@@ -77,6 +129,7 @@ export function activate(context: vscode.ExtensionContext) {
             parentId: selectedDirectory.id,
             order: 0,
             createTime: Date.now(),
+            language: language, // 设置检测到的语言
           }
 
           await storageManager.saveSnippet(snippet)
@@ -92,7 +145,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const document = await vscode.workspace.openTextDocument({
       content: snippet.code,
-      language: snippet.fileName.split('.').pop() || 'plaintext',
+      language: snippet.language || snippet.fileName.split('.').pop() || 'plaintext',
     })
     await vscode.window.showTextDocument(document, { preview: true })
   })
@@ -147,16 +200,70 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     if (name) {
+      // 让用户选择语言
+      const languageOptions = [
+        { label: '纯文本', value: 'plaintext' },
+        { label: 'TypeScript', value: 'typescript' },
+        { label: 'JavaScript', value: 'javascript' },
+        { label: 'HTML', value: 'html' },
+        { label: 'CSS', value: 'css' },
+        { label: 'JSON', value: 'json' },
+        { label: 'Vue', value: 'vue' },
+        { label: 'Python', value: 'python' },
+        { label: 'Java', value: 'java' },
+        { label: 'C#', value: 'csharp' },
+        { label: 'C++', value: 'cpp' },
+        { label: 'Go', value: 'go' },
+        { label: 'PHP', value: 'php' },
+        { label: 'Ruby', value: 'ruby' },
+        { label: 'Rust', value: 'rust' },
+        { label: 'SQL', value: 'sql' },
+        { label: 'Markdown', value: 'markdown' },
+        { label: 'YAML', value: 'yaml' },
+        { label: 'Shell', value: 'shell' },
+      ]
+      
+      const selectedLanguage = await vscode.window.showQuickPick(languageOptions, {
+        placeHolder: '选择代码语言',
+      })
+      
+      if (!selectedLanguage) return // 用户取消了选择
+      
+      // 根据选择的语言设置文件名
+      let fileName = 'snippet'
+      switch (selectedLanguage.value) {
+        case 'typescript': fileName += '.ts'; break
+        case 'javascript': fileName += '.js'; break
+        case 'html': fileName += '.html'; break
+        case 'css': fileName += '.css'; break
+        case 'json': fileName += '.json'; break
+        case 'vue': fileName += '.vue'; break
+        case 'python': fileName += '.py'; break
+        case 'java': fileName += '.java'; break
+        case 'csharp': fileName += '.cs'; break
+        case 'cpp': fileName += '.cpp'; break
+        case 'go': fileName += '.go'; break
+        case 'php': fileName += '.php'; break
+        case 'ruby': fileName += '.rb'; break
+        case 'rust': fileName += '.rs'; break
+        case 'sql': fileName += '.sql'; break
+        case 'markdown': fileName += '.md'; break
+        case 'yaml': fileName += '.yml'; break
+        case 'shell': fileName += '.sh'; break
+        default: fileName += '.txt'
+      }
+      
       const snippet: CodeSnippet = {
         id: uuidv4(),
         name,
         code: '', // 初始为空代码
-        fileName: 'snippet.txt',
+        fileName: fileName,
         filePath: '',
         category: item.directory.name,
         parentId: item.directory.id,
         order: 0,
         createTime: Date.now(),
+        language: selectedLanguage.value, // 设置选择的语言
       }
 
       await storageManager.saveSnippet(snippet)

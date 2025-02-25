@@ -97,6 +97,9 @@ function getWebviewContent(
     const monacoBase = webview.asWebviewUri(
         vscode.Uri.joinPath(context.extensionUri, 'dist', 'monaco-editor')
     );
+    
+    // 使用Base64编码代码片段，避免HTML解析问题
+    const encodedCode = Buffer.from(snippet.code).toString('base64');
 
     return `<!DOCTYPE html>
     <html>
@@ -150,6 +153,7 @@ function getWebviewContent(
                     <option value="html">HTML</option>
                     <option value="css">CSS</option>
                     <option value="json">JSON</option>
+                    <option value="vue">Vue</option>
                     <option value="python">Python</option>
                     <option value="java">Java</option>
                     <option value="csharp">C#</option>
@@ -186,7 +190,35 @@ function getWebviewContent(
             let editor;
             let currentLanguage = ${JSON.stringify(snippet.language || 'typescript')};
             
+            // Base64编码的代码片段
+            const encodedCode = "${encodedCode}";
+            
+            // 解码函数
+            function decodeBase64(str) {
+                // 创建一个Buffer对象
+                return decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+            }
+            
             require(['vs/editor/editor.main'], function() {
+                // 注册Vue语言支持
+                if (!monaco.languages.getLanguages().some(lang => lang.id === 'vue')) {
+                    monaco.languages.register({ id: 'vue' });
+                    
+                    // 使用HTML语法高亮作为Vue的基础
+                    const htmlLanguage = monaco.languages.getLanguages().find(lang => lang.id === 'html');
+                    if (htmlLanguage && htmlLanguage.loader) {
+                        // 加载HTML语言支持
+                        htmlLanguage.loader().then(htmlModule => {
+                            if (htmlModule.language) {
+                                // 使用HTML的语法高亮规则
+                                monaco.languages.setMonarchTokensProvider('vue', htmlModule.language);
+                            }
+                        });
+                    }
+                }
+                
                 // 全局禁用验证
                 monaco.editor.onDidCreateModel(model => {
                     // 为所有创建的模型禁用验证
@@ -198,8 +230,12 @@ function getWebviewContent(
                 monaco.editor.EditorOptions.suggestOnTriggerCharacters.defaultValue = false;
                 monaco.editor.EditorOptions.snippetSuggestions.defaultValue = 'none';
                 monaco.editor.EditorOptions.suggest.defaultValue = { showIcons: false, filterGraceful: false, showMethods: false, showFunctions: false, showConstructors: false, showFields: false, showVariables: false, showClasses: false, showStructs: false, showInterfaces: false, showModules: false, showProperties: false, showEvents: false, showOperators: false, showUnits: false, showValues: false, showConstants: false, showEnums: false, showEnumMembers: false, showKeywords: false, showWords: false, showColors: false, showFiles: false, showReferences: false, showFolders: false, showTypeParameters: false, showIssues: false, showUsers: false };
+                // 解码Base64编码的代码片段
+                const decodedCode = decodeBase64(encodedCode);
+                
+                // 创建编辑器并设置解码后的代码
                 editor = monaco.editor.create(document.getElementById('container'), {
-                    value: ${JSON.stringify(snippet.code)},
+                    value: decodedCode,
                     language: currentLanguage,
                     theme: 'vs-dark',
                     automaticLayout: true,
@@ -228,6 +264,25 @@ function getWebviewContent(
                 
                 // 为所有语言禁用验证
                 monaco.editor.setModelMarkers(editor.getModel(), currentLanguage, []);
+                
+                // 初始化时检查是否是Vue文件，并且是否包含<script setup lang="ts">标签
+                if (currentLanguage === 'vue') {
+                    const code = editor.getValue();
+                    // 检查代码中是否包含相关标签
+                    if (code.includes('<script setup') && code.includes('lang="ts"')) {
+                        console.log('初始化时检测到Vue文件包含<script setup lang="ts">标签，应用特殊处理');
+                        // 禁用所有相关语言的验证
+                        monaco.editor.setModelMarkers(editor.getModel(), 'vue', []);
+                        monaco.editor.setModelMarkers(editor.getModel(), 'typescript', []);
+                        monaco.editor.setModelMarkers(editor.getModel(), 'javascript', []);
+                        
+                        // 禁用TypeScript验证
+                        monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+                            noSemanticValidation: true,
+                            noSyntaxValidation: true
+                        });
+                    }
+                }
 
                 // 添加快捷键支持
                 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveSnippet);
@@ -259,15 +314,52 @@ function getWebviewContent(
                             noSyntaxValidation: true
                         });
                     }
+                    
+                    // 对Vue文件特殊处理
+                    if (currentLanguage === 'vue') {
+                        // 禁用Vue文件的验证
+                        monaco.editor.setModelMarkers(editor.getModel(), 'vue', []);
+                        
+                        // 对Vue文件中的TypeScript也禁用验证
+                        monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+                            noSemanticValidation: true,
+                            noSyntaxValidation: true
+                        });
+                        
+                        // 为Vue文件设置特殊的处理，避免<script setup>标签导致问题
+                        const code = editor.getValue();
+                        // 检查代码中是否包含相关标签
+                        if (code.includes('<script setup') && code.includes('lang="ts"')) {
+                            // 如果检测到<script setup lang="ts">，确保禁用所有验证
+                            monaco.editor.setModelMarkers(editor.getModel(), 'typescript', []);
+                            monaco.editor.setModelMarkers(editor.getModel(), 'javascript', []);
+                        }
+                    }
                 });
             });
 
             function saveSnippet() {
+                // 直接获取编辑器中的代码，不需要转义处理
                 const code = editor.getValue();
+                
+                // 特殊处理Vue文件，确保正确保存
+                let finalLanguage = currentLanguage;
+                
+                // 如果是Vue文件，检查是否包含<script setup lang="ts">
+                if (finalLanguage === 'vue' && code.includes('<script setup') && code.includes('lang="ts"')) {
+                    // 在保存前确保禁用所有验证
+                    monaco.editor.setModelMarkers(editor.getModel(), 'vue', []);
+                    monaco.editor.setModelMarkers(editor.getModel(), 'typescript', []);
+                    monaco.editor.setModelMarkers(editor.getModel(), 'javascript', []);
+                    
+                    // 在控制台记录特殊处理
+                    console.log('检测到Vue文件包含<script setup lang="ts">标签，应用特殊处理');
+                }
+                
                 vscode.postMessage({
                     command: 'save',
                     code: code,
-                    language: currentLanguage
+                    language: finalLanguage
                 });
                 showSaveSuccess();
             }
