@@ -1,7 +1,7 @@
 // src/extension.ts
 import * as vscode from 'vscode'
 import { StorageManager } from './storage/storageManager'
-import { CopyCodeTreeDataProvider, TreeItem } from './explorer/treeDataProvider'
+import { SnippetWebviewProvider } from './explorer/webviewProvider'
 import { v4 as uuidv4 } from 'uuid'
 import { CodeSnippet, Directory } from './models/types'
 import { SnippetEditor } from './editor/snippetEditor'
@@ -11,7 +11,13 @@ export function activate(context: vscode.ExtensionContext) {
   SnippetEditor.initialize(context)
 
   const storageManager = new StorageManager(context)
-  const treeDataProvider = new CopyCodeTreeDataProvider(storageManager)
+  const webviewProvider = new SnippetWebviewProvider(context.extensionUri, storageManager)
+
+  // 注册webview
+  const webviewView = vscode.window.registerWebviewViewProvider(
+    'copyCodeExplorer',
+    webviewProvider
+  )
 
   // 插入代码片段的通用函数
   async function insertSnippet(snippet: CodeSnippet) {
@@ -27,15 +33,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
     return false
   }
-
-  // 注册视图
-  const treeView = vscode.window.createTreeView('copyCodeExplorer', {
-    treeDataProvider,
-    dragAndDropController: treeDataProvider.getDragAndDropController(),
-    canSelectMany: false,
-    showCollapseAll: true,
-    manageCheckboxStateManually: true,
-  })
 
   // 注册保存代码片段命令
   let saveToLibrary = vscode.commands.registerCommand('starcode-snippets.saveToLibrary', async () => {
@@ -175,11 +172,11 @@ export function activate(context: vscode.ExtensionContext) {
             parentId: selectedDirectory.id,
             order: 0,
             createTime: Date.now(),
-            language: language, // 设置检测到的语言
+            language: language,
           }
 
           await storageManager.saveSnippet(snippet)
-          treeDataProvider.refresh()
+          webviewProvider.refresh()
         }
       }
     }
@@ -195,12 +192,22 @@ export function activate(context: vscode.ExtensionContext) {
         content: snippet.code,
         language: snippet.language || snippet.fileName.split('.').pop() || 'plaintext',
       })
-      await vscode.window.showTextDocument(document, { preview: true })
+      await vscode.window.showTextDocument(document, {
+        preview: true,
+        viewColumn: vscode.ViewColumn.Beside,  // 在旁边打开
+        preserveFocus: true,  // 保持原窗口焦点
+      })
+      
+      // 设置为只读模式
+      const editor = vscode.window.activeTextEditor;
+      if (editor && editor.document === document) {
+        await vscode.commands.executeCommand('workbench.action.toggleEditorReadonly');
+      }
     }
   )
 
   // 重命名命令
-  let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: TreeItem) => {
+  let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: any) => {
     if (!item) return
 
     const newName = await vscode.window.showInputBox({
@@ -216,7 +223,7 @@ export function activate(context: vscode.ExtensionContext) {
         const updatedDirectory = { ...item.directory, name: newName }
         await storageManager.updateDirectory(updatedDirectory)
       }
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
@@ -235,14 +242,14 @@ export function activate(context: vscode.ExtensionContext) {
         order: 0,
       }
       await storageManager.createDirectory(directory)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 在指定目录中创建代码片段命令
   let createSnippetInDirectory = vscode.commands.registerCommand(
     'starcode-snippets.createSnippetInDirectory',
-    async (item: TreeItem) => {
+    async (item: any) => {
       if (!item?.directory) return
 
       const name = await vscode.window.showInputBox({
@@ -344,36 +351,36 @@ export function activate(context: vscode.ExtensionContext) {
         const snippet: CodeSnippet = {
           id: uuidv4(),
           name,
-          code: '', // 初始为空代码
+          code: '',
           fileName: fileName,
           filePath: '',
           category: item.directory.name,
           parentId: item.directory.id,
           order: 0,
           createTime: Date.now(),
-          language: selectedLanguage.value, // 设置选择的语言
+          language: selectedLanguage.value,
         }
 
         await storageManager.saveSnippet(snippet)
-        treeDataProvider.refresh()
+        webviewProvider.refresh()
 
         // 打开编辑器编辑代码片段
         const updatedSnippet = await SnippetEditor.edit(snippet)
         if (updatedSnippet) {
           await storageManager.updateSnippet(updatedSnippet)
-          treeDataProvider.refresh()
+          webviewProvider.refresh()
         }
       }
     }
   )
 
   // 删除命令
-  let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: TreeItem) => {
+  let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: any) => {
     if (!item) return
 
     const confirmMessage = item.snippet
-      ? `确定要删除代码片段 "${item.label}" 吗？`
-      : `确定要删除目录 "${item.label}" 及其所有内容吗？`
+      ? `确定要删除代码片段 "${item.name}" 吗？`
+      : `确定要删除目录 "${item.name}" 及其所有内容吗？`
 
     const confirm = await vscode.window.showWarningMessage(confirmMessage, { modal: true }, '确定')
 
@@ -383,36 +390,36 @@ export function activate(context: vscode.ExtensionContext) {
       } else if (item.directory) {
         await storageManager.deleteDirectory(item.directory.id)
       }
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 追加粘贴命令
-  let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: TreeItem) => {
+  let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: any) => {
     if (!item?.snippet) return
 
     const editor = vscode.window.activeTextEditor
     if (editor) {
       const position = editor.selection.active
       await editor.edit((editBuilder) => {
-        editBuilder.insert(position, item.snippet!.code)
+        editBuilder.insert(position, item.snippet.code)
       })
     }
   })
 
   // 编辑代码命令
-  let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: TreeItem) => {
+  let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: any) => {
     if (!item?.snippet) return
 
     const updatedSnippet = await SnippetEditor.edit(item.snippet)
     if (updatedSnippet) {
       await storageManager.updateSnippet(updatedSnippet)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 移动到目录命令
-  let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: TreeItem) => {
+  let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: any) => {
     if (!item?.snippet) return
 
     const directories = await storageManager.getAllDirectories()
@@ -432,7 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
         category: selectedDirectory.label,
       }
       await storageManager.updateSnippet(updatedSnippet)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
@@ -444,10 +451,10 @@ export function activate(context: vscode.ExtensionContext) {
     }
   )
 
-  // 注册刷新树视图命令
+  // 注册刷新视图命令
   let refreshExplorer = vscode.commands.registerCommand('starcode-snippets.refreshExplorer', () => {
-    // 重新加载所有代码片段数据
-    treeDataProvider.refresh()
+    webviewProvider.refresh()
+    console.log('刷新视图')
     vscode.window.showInformationMessage('代码库已刷新')
   })
 
@@ -464,7 +471,7 @@ export function activate(context: vscode.ExtensionContext) {
     insertSnippetCommand,
     createSnippetInDirectory,
     refreshExplorer,
-    treeView
+    webviewView
   )
 }
 
