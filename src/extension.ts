@@ -34,6 +34,18 @@ export function activate(context: vscode.ExtensionContext) {
     return false
   }
 
+  // 检查同一目录下是否有重名代码片段
+  async function checkDuplicateSnippetName(name: string, parentId: string | null): Promise<boolean> {
+    const snippets = await storageManager.getAllSnippets()
+    return snippets.some(s => s.name === name && s.parentId === parentId)
+  }
+
+  // 检查同一级别是否有重名目录
+  async function checkDuplicateDirectoryName(name: string, parentId: string | null): Promise<boolean> {
+    const directories = await storageManager.getAllDirectories()
+    return directories.some(d => d.name === name && d.parentId === parentId)
+  }
+
   // 注册保存代码片段命令
   let saveToLibrary = vscode.commands.registerCommand('starcode-snippets.saveToLibrary', async () => {
     const editor = vscode.window.activeTextEditor
@@ -64,6 +76,12 @@ export function activate(context: vscode.ExtensionContext) {
         })
 
         if (selectedDirectory) {
+          // 检查是否有重名代码片段
+          const isDuplicate = await checkDuplicateSnippetName(name, selectedDirectory.id)
+          if (isDuplicate) {
+            vscode.window.showErrorMessage(`所选目录中已存在名为 "${name}" 的代码片段`)
+            return
+          }
           // 根据文件扩展名或内容自动检测语言
           let language = 'plaintext'
 
@@ -188,23 +206,135 @@ export function activate(context: vscode.ExtensionContext) {
     async (snippet: CodeSnippet) => {
       if (!snippet) return
 
-      const document = await vscode.workspace.openTextDocument({
-        content: snippet.code,
-        language: snippet.language || snippet.fileName.split('.').pop() || 'plaintext',
-      })
-      await vscode.window.showTextDocument(document, {
-        preview: true,
-        viewColumn: vscode.ViewColumn.Beside,  // 在旁边打开
-        preserveFocus: true,  // 保持原窗口焦点
-      })
+      // 创建并显示webview
+      const panel = vscode.window.createWebviewPanel(
+        'snippetPreview', // 标识符
+        `预览: ${snippet.name}`, // 标题
+        vscode.ViewColumn.Beside, // 在旁边打开
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: [context.extensionUri]
+        }
+      );
+
+      // 获取代码语言
+      const language = snippet.language || snippet.fileName.split('.').pop() || 'plaintext';
       
-      // 设置为只读模式
-      const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document === document) {
-        await vscode.commands.executeCommand('workbench.action.toggleEditorReadonly');
-      }
+      // 生成HTML内容
+      panel.webview.html = getPreviewHtml(snippet.code, language, snippet.name);
     }
   )
+
+  // 生成预览HTML
+  function getPreviewHtml(code: string, language: string, snippetName: string): string {
+    // 转义HTML特殊字符
+    const escapedCode = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>代码片段预览</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/vs2015.min.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/${getHighlightJsLanguage(language)}.min.js"></script>
+        <style>
+            body {
+                padding: 16px;
+                color: var(--vscode-foreground);
+                font-family: var(--vscode-editor-font-family);
+                font-size: var(--vscode-editor-font-size);
+                background-color: var(--vscode-editor-background);
+            }
+            .header {
+                margin-bottom: 16px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--vscode-panel-border);
+            }
+            .title {
+                font-size: 1.2em;
+                font-weight: bold;
+                margin: 0;
+                padding: 0;
+            }
+            .language-badge {
+                display: inline-block;
+                background-color: var(--vscode-badge-background);
+                color: var(--vscode-badge-foreground);
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 0.8em;
+                margin-left: 8px;
+            }
+            pre {
+                margin: 0;
+                padding: 16px;
+                border-radius: 4px;
+                overflow: auto;
+                background-color: var(--vscode-editor-background);
+            }
+            code {
+                font-family: var(--vscode-editor-font-family), 'Courier New', monospace;
+                tab-size: 4;
+            }
+            .hljs {
+                background-color: var(--vscode-editor-background) !important;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">
+                ${snippetName}
+                <span class="language-badge">${language}</span>
+            </div>
+        </div>
+        <pre><code class="language-${getHighlightJsLanguage(language)}">${escapedCode}</code></pre>
+        <script>
+            document.addEventListener('DOMContentLoaded', (event) => {
+                document.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                });
+            });
+            hljs.highlightAll();
+        </script>
+    </body>
+    </html>`;
+  }
+
+  // 将VSCode语言ID转换为highlight.js支持的语言ID
+  function getHighlightJsLanguage(language: string): string {
+    const languageMap: {[key: string]: string} = {
+      'typescript': 'typescript',
+      'javascript': 'javascript',
+      'html': 'html',
+      'css': 'css',
+      'json': 'json',
+      'vue': 'xml', // highlight.js没有专门的vue支持，使用xml
+      'python': 'python',
+      'java': 'java',
+      'csharp': 'csharp',
+      'cpp': 'cpp',
+      'go': 'go',
+      'php': 'php',
+      'ruby': 'ruby',
+      'rust': 'rust',
+      'sql': 'sql',
+      'markdown': 'markdown',
+      'yaml': 'yaml',
+      'shell': 'bash',
+      'plaintext': 'plaintext'
+    };
+
+    return languageMap[language] || 'plaintext';
+  }
 
   // 重命名命令
   let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: any) => {
@@ -217,9 +347,21 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (newName) {
       if (item.snippet) {
+        // 检查是否有重名代码片段
+        const isDuplicate = await checkDuplicateSnippetName(newName, item.snippet.parentId)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`所选目录中已存在名为 "${newName}" 的代码片段`)
+          return
+        }
         const updatedSnippet = { ...item.snippet, name: newName }
         await storageManager.updateSnippet(updatedSnippet)
       } else if (item.directory) {
+        // 检查是否有重名目录
+        const isDuplicate = await checkDuplicateDirectoryName(newName, item.directory.parentId)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`当前层级已存在名为 "${newName}" 的目录`)
+          return
+        }
         const updatedDirectory = { ...item.directory, name: newName }
         await storageManager.updateDirectory(updatedDirectory)
       }
@@ -235,6 +377,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     if (name) {
+      // 检查是否有重名目录
+      const isDuplicate = await checkDuplicateDirectoryName(name, null)
+      if (isDuplicate) {
+        vscode.window.showErrorMessage(`根目录下已存在名为 "${name}" 的目录`)
+        return
+      }
+
       const directory: Directory = {
         id: uuidv4(),
         name,
@@ -258,6 +407,13 @@ export function activate(context: vscode.ExtensionContext) {
       })
 
       if (name) {
+        // 检查是否有重名代码片段
+        const isDuplicate = await checkDuplicateSnippetName(name, item.directory.id)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`目录 "${item.directory.name}" 中已存在名为 "${name}" 的代码片段`)
+          return
+        }
+
         // 让用户选择语言
         const languageOptions = [
           { label: '纯文本', value: 'plaintext' },
@@ -433,6 +589,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     if (selectedDirectory) {
+      // 检查目标目录中是否已有同名代码片段
+      const isDuplicate = await checkDuplicateSnippetName(item.snippet.name, selectedDirectory.id)
+      if (isDuplicate) {
+        vscode.window.showErrorMessage(`目标目录中已存在名为 "${item.snippet.name}" 的代码片段`)
+        return
+      }
+
       const updatedSnippet = {
         ...item.snippet,
         parentId: selectedDirectory.id,

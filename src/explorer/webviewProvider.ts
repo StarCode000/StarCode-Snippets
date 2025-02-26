@@ -161,19 +161,23 @@ export class SnippetWebviewProvider {
                 display: flex;
             }
             .action-button {
+                border-radius: 3px;
                 padding: 2px;
                 margin-left: 4px;
                 cursor: pointer;
                 border: none;
                 background: none;
                 color: var(--vscode-foreground);
+                transition: 0.4s;
             }
             .action-button:hover {
                 color: var(--vscode-button-foreground);
                 background-color: var(--vscode-button-background);
+                box-shadow: 0 0 2px var(--vscode-button-hoverBackground);
             }
             .toolbar {
-                background-color:#181b24;
+                border: 2px solid var(--vscode-button-background);
+                border-radius: 6px;
                 padding: 5px;
                 display: flex;
                 justify-content: flex-end;
@@ -187,6 +191,7 @@ export class SnippetWebviewProvider {
                 border: none;
                 border-radius: 3px;
                 cursor: pointer;
+                transition: 0.4s;
             }
             .toolbar button:hover {
                 background-color: var(--vscode-button-hoverBackground);
