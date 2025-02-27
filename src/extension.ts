@@ -1,7 +1,7 @@
 // src/extension.ts
 import * as vscode from 'vscode'
 import { StorageManager } from './storage/storageManager'
-import { CopyCodeTreeDataProvider, TreeItem } from './explorer/treeDataProvider'
+import { SnippetWebviewProvider } from './explorer/webviewProvider'
 import { v4 as uuidv4 } from 'uuid'
 import { CodeSnippet, Directory } from './models/types'
 import { SnippetEditor } from './editor/snippetEditor'
@@ -11,7 +11,13 @@ export function activate(context: vscode.ExtensionContext) {
   SnippetEditor.initialize(context)
 
   const storageManager = new StorageManager(context)
-  const treeDataProvider = new CopyCodeTreeDataProvider(storageManager)
+  const webviewProvider = new SnippetWebviewProvider(context.extensionUri, storageManager)
+
+  // 注册webview
+  const webviewView = vscode.window.registerWebviewViewProvider(
+    'copyCodeExplorer',
+    webviewProvider
+  )
 
   // 插入代码片段的通用函数
   async function insertSnippet(snippet: CodeSnippet) {
@@ -28,14 +34,17 @@ export function activate(context: vscode.ExtensionContext) {
     return false
   }
 
-  // 注册视图
-  const treeView = vscode.window.createTreeView('copyCodeExplorer', {
-    treeDataProvider,
-    dragAndDropController: treeDataProvider.getDragAndDropController(),
-    canSelectMany: false,
-    showCollapseAll: true,
-    manageCheckboxStateManually: true,
-  })
+  // 检查同一目录下是否有重名代码片段
+  async function checkDuplicateSnippetName(name: string, parentId: string | null): Promise<boolean> {
+    const snippets = await storageManager.getAllSnippets()
+    return snippets.some(s => s.name === name && s.parentId === parentId)
+  }
+
+  // 检查同一级别是否有重名目录
+  async function checkDuplicateDirectoryName(name: string, parentId: string | null): Promise<boolean> {
+    const directories = await storageManager.getAllDirectories()
+    return directories.some(d => d.name === name && d.parentId === parentId)
+  }
 
   // 注册保存代码片段命令
   let saveToLibrary = vscode.commands.registerCommand('starcode-snippets.saveToLibrary', async () => {
@@ -67,6 +76,12 @@ export function activate(context: vscode.ExtensionContext) {
         })
 
         if (selectedDirectory) {
+          // 检查是否有重名代码片段
+          const isDuplicate = await checkDuplicateSnippetName(name, selectedDirectory.id)
+          if (isDuplicate) {
+            vscode.window.showErrorMessage(`所选目录中已存在名为 "${name}" 的代码片段`)
+            return
+          }
           // 根据文件扩展名或内容自动检测语言
           let language = 'plaintext'
 
@@ -175,11 +190,11 @@ export function activate(context: vscode.ExtensionContext) {
             parentId: selectedDirectory.id,
             order: 0,
             createTime: Date.now(),
-            language: language, // 设置检测到的语言
+            language: language,
           }
 
           await storageManager.saveSnippet(snippet)
-          treeDataProvider.refresh()
+          webviewProvider.refresh()
         }
       }
     }
@@ -191,16 +206,138 @@ export function activate(context: vscode.ExtensionContext) {
     async (snippet: CodeSnippet) => {
       if (!snippet) return
 
-      const document = await vscode.workspace.openTextDocument({
-        content: snippet.code,
-        language: snippet.language || snippet.fileName.split('.').pop() || 'plaintext',
-      })
-      await vscode.window.showTextDocument(document, { preview: true })
+      // 创建并显示webview
+      const panel = vscode.window.createWebviewPanel(
+        'snippetPreview', // 标识符
+        `预览: ${snippet.name}`, // 标题
+        vscode.ViewColumn.Beside, // 在旁边打开
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: [context.extensionUri]
+        }
+      );
+
+      // 获取代码语言
+      const language = snippet.language || snippet.fileName.split('.').pop() || 'plaintext';
+      
+      // 生成HTML内容
+      panel.webview.html = getPreviewHtml(snippet.code, language, snippet.name);
     }
   )
 
+  // 生成预览HTML
+  function getPreviewHtml(code: string, language: string, snippetName: string): string {
+    // 转义HTML特殊字符
+    const escapedCode = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>代码片段预览</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/vs2015.min.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/${getHighlightJsLanguage(language)}.min.js"></script>
+        <style>
+            body {
+                padding: 16px;
+                color: var(--vscode-foreground);
+                font-family: var(--vscode-editor-font-family);
+                font-size: var(--vscode-editor-font-size);
+                background-color: var(--vscode-editor-background);
+            }
+            .header {
+                margin-bottom: 16px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--vscode-panel-border);
+            }
+            .title {
+                font-size: 1.2em;
+                font-weight: bold;
+                margin: 0;
+                padding: 0;
+            }
+            .language-badge {
+                display: inline-block;
+                background-color: var(--vscode-badge-background);
+                color: var(--vscode-badge-foreground);
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 0.8em;
+                margin-left: 8px;
+            }
+            pre {
+                margin: 0;
+                padding: 16px;
+                border-radius: 4px;
+                overflow: auto;
+                background-color: var(--vscode-editor-background);
+            }
+            code {
+                font-family: var(--vscode-editor-font-family), 'Courier New', monospace;
+                tab-size: 4;
+            }
+            .hljs {
+                background-color: var(--vscode-editor-background) !important;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">
+                ${snippetName}
+                <span class="language-badge">${language}</span>
+            </div>
+        </div>
+        <pre><code class="language-${getHighlightJsLanguage(language)}">${escapedCode}</code></pre>
+        <script>
+            document.addEventListener('DOMContentLoaded', (event) => {
+                document.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                });
+            });
+            hljs.highlightAll();
+        </script>
+    </body>
+    </html>`;
+  }
+
+  // 将VSCode语言ID转换为highlight.js支持的语言ID
+  function getHighlightJsLanguage(language: string): string {
+    const languageMap: {[key: string]: string} = {
+      'typescript': 'typescript',
+      'javascript': 'javascript',
+      'html': 'html',
+      'css': 'css',
+      'json': 'json',
+      'vue': 'xml', // highlight.js没有专门的vue支持，使用xml
+      'python': 'python',
+      'java': 'java',
+      'csharp': 'csharp',
+      'cpp': 'cpp',
+      'go': 'go',
+      'php': 'php',
+      'ruby': 'ruby',
+      'rust': 'rust',
+      'sql': 'sql',
+      'markdown': 'markdown',
+      'yaml': 'yaml',
+      'shell': 'bash',
+      'plaintext': 'plaintext'
+    };
+
+    return languageMap[language] || 'plaintext';
+  }
+
   // 重命名命令
-  let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: TreeItem) => {
+  let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: any) => {
     if (!item) return
 
     const newName = await vscode.window.showInputBox({
@@ -210,13 +347,25 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (newName) {
       if (item.snippet) {
+        // 检查是否有重名代码片段
+        const isDuplicate = await checkDuplicateSnippetName(newName, item.snippet.parentId)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`所选目录中已存在名为 "${newName}" 的代码片段`)
+          return
+        }
         const updatedSnippet = { ...item.snippet, name: newName }
         await storageManager.updateSnippet(updatedSnippet)
       } else if (item.directory) {
+        // 检查是否有重名目录
+        const isDuplicate = await checkDuplicateDirectoryName(newName, item.directory.parentId)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`当前层级已存在名为 "${newName}" 的目录`)
+          return
+        }
         const updatedDirectory = { ...item.directory, name: newName }
         await storageManager.updateDirectory(updatedDirectory)
       }
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
@@ -228,6 +377,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     if (name) {
+      // 检查是否有重名目录
+      const isDuplicate = await checkDuplicateDirectoryName(name, null)
+      if (isDuplicate) {
+        vscode.window.showErrorMessage(`根目录下已存在名为 "${name}" 的目录`)
+        return
+      }
+
       const directory: Directory = {
         id: uuidv4(),
         name,
@@ -235,14 +391,14 @@ export function activate(context: vscode.ExtensionContext) {
         order: 0,
       }
       await storageManager.createDirectory(directory)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 在指定目录中创建代码片段命令
   let createSnippetInDirectory = vscode.commands.registerCommand(
     'starcode-snippets.createSnippetInDirectory',
-    async (item: TreeItem) => {
+    async (item: any) => {
       if (!item?.directory) return
 
       const name = await vscode.window.showInputBox({
@@ -251,6 +407,13 @@ export function activate(context: vscode.ExtensionContext) {
       })
 
       if (name) {
+        // 检查是否有重名代码片段
+        const isDuplicate = await checkDuplicateSnippetName(name, item.directory.id)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`目录 "${item.directory.name}" 中已存在名为 "${name}" 的代码片段`)
+          return
+        }
+
         // 让用户选择语言
         const languageOptions = [
           { label: '纯文本', value: 'plaintext' },
@@ -344,36 +507,36 @@ export function activate(context: vscode.ExtensionContext) {
         const snippet: CodeSnippet = {
           id: uuidv4(),
           name,
-          code: '', // 初始为空代码
+          code: '',
           fileName: fileName,
           filePath: '',
           category: item.directory.name,
           parentId: item.directory.id,
           order: 0,
           createTime: Date.now(),
-          language: selectedLanguage.value, // 设置选择的语言
+          language: selectedLanguage.value,
         }
 
         await storageManager.saveSnippet(snippet)
-        treeDataProvider.refresh()
+        webviewProvider.refresh()
 
         // 打开编辑器编辑代码片段
         const updatedSnippet = await SnippetEditor.edit(snippet)
         if (updatedSnippet) {
           await storageManager.updateSnippet(updatedSnippet)
-          treeDataProvider.refresh()
+          webviewProvider.refresh()
         }
       }
     }
   )
 
   // 删除命令
-  let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: TreeItem) => {
+  let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: any) => {
     if (!item) return
 
     const confirmMessage = item.snippet
-      ? `确定要删除代码片段 "${item.label}" 吗？`
-      : `确定要删除目录 "${item.label}" 及其所有内容吗？`
+      ? `确定要删除代码片段 "${item.snippet.name}" 吗？`
+      : `确定要删除目录 "${item.directory.name}" 及其所有内容吗？`
 
     const confirm = await vscode.window.showWarningMessage(confirmMessage, { modal: true }, '确定')
 
@@ -383,36 +546,36 @@ export function activate(context: vscode.ExtensionContext) {
       } else if (item.directory) {
         await storageManager.deleteDirectory(item.directory.id)
       }
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 追加粘贴命令
-  let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: TreeItem) => {
+  let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: any) => {
     if (!item?.snippet) return
 
     const editor = vscode.window.activeTextEditor
     if (editor) {
       const position = editor.selection.active
       await editor.edit((editBuilder) => {
-        editBuilder.insert(position, item.snippet!.code)
+        editBuilder.insert(position, item.snippet.code)
       })
     }
   })
 
   // 编辑代码命令
-  let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: TreeItem) => {
+  let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: any) => {
     if (!item?.snippet) return
 
     const updatedSnippet = await SnippetEditor.edit(item.snippet)
     if (updatedSnippet) {
       await storageManager.updateSnippet(updatedSnippet)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
   // 移动到目录命令
-  let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: TreeItem) => {
+  let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: any) => {
     if (!item?.snippet) return
 
     const directories = await storageManager.getAllDirectories()
@@ -426,13 +589,20 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     if (selectedDirectory) {
+      // 检查目标目录中是否已有同名代码片段
+      const isDuplicate = await checkDuplicateSnippetName(item.snippet.name, selectedDirectory.id)
+      if (isDuplicate) {
+        vscode.window.showErrorMessage(`目标目录中已存在名为 "${item.snippet.name}" 的代码片段`)
+        return
+      }
+
       const updatedSnippet = {
         ...item.snippet,
         parentId: selectedDirectory.id,
         category: selectedDirectory.label,
       }
       await storageManager.updateSnippet(updatedSnippet)
-      treeDataProvider.refresh()
+      webviewProvider.refresh()
     }
   })
 
@@ -444,10 +614,10 @@ export function activate(context: vscode.ExtensionContext) {
     }
   )
 
-  // 注册刷新树视图命令
+  // 注册刷新视图命令
   let refreshExplorer = vscode.commands.registerCommand('starcode-snippets.refreshExplorer', () => {
-    // 重新加载所有代码片段数据
-    treeDataProvider.refresh()
+    webviewProvider.refresh()
+    console.log('刷新视图')
     vscode.window.showInformationMessage('代码库已刷新')
   })
 
@@ -464,7 +634,7 @@ export function activate(context: vscode.ExtensionContext) {
     insertSnippetCommand,
     createSnippetInDirectory,
     refreshExplorer,
-    treeView
+    webviewView
   )
 }
 
