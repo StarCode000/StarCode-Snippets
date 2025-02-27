@@ -103,6 +103,10 @@ export class SnippetWebviewProvider {
                 font-family: var(--vscode-font-family);
                 font-size: var(--vscode-font-size);
                 background-color: var(--vscode-editor-background);
+                -webkit-user-select: none; /* Safari */
+                -moz-user-select: none; /* Firefox */
+                -ms-user-select: none; /* IE 10+/Edge */
+                user-select: none; /* Standard syntax */
             }
             .container {
                 padding: 10px;
@@ -111,6 +115,7 @@ export class SnippetWebviewProvider {
                 margin: 2px 0;
             }
             .directory {
+                height: 24px;
                 padding: 5px;
                 cursor: pointer;
                 display: flex;
@@ -138,6 +143,7 @@ export class SnippetWebviewProvider {
                 display: none;
             }
             .snippet {
+                height: 24px;
                 padding: 5px;
                 cursor: pointer;
                 display: flex;
@@ -207,6 +213,9 @@ export class SnippetWebviewProvider {
             <div id="content"></div>
         </div>
         <script>
+            document.addEventListener('contextmenu', function(event) {
+              event.preventDefault(); // 阻止默认的右键菜单
+            });
             const vscode = acquireVsCodeApi();
             let directories = [];
             let snippets = [];
@@ -281,7 +290,7 @@ export class SnippetWebviewProvider {
                     <span>📁 \${directory.name}</span>
                     <div class="actions">
                         <button class="action-button" onclick="createSnippetInDirectory('\${directory.id}')" title="新建代码片段">➕</button>
-                        <button class="action-button" onclick="renameDirectory('\${directory.id}')" title="重命名目录">✏️</button>
+                        <button class="action-button" onclick="renameDirectory('\${directory.id}')" title="重命名目录">📝</button>
                         <button class="action-button" onclick="deleteDirectory('\${directory.id}')" title="删除目录">🗑️</button>
                     </div>
                 \`;
