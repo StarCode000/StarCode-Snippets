@@ -535,8 +535,8 @@ export function activate(context: vscode.ExtensionContext) {
     if (!item) return
 
     const confirmMessage = item.snippet
-      ? `确定要删除代码片段 "${item.name}" 吗？`
-      : `确定要删除目录 "${item.name}" 及其所有内容吗？`
+      ? `确定要删除代码片段 "${item.snippet.name}" 吗？`
+      : `确定要删除目录 "${item.directory.name}" 及其所有内容吗？`
 
     const confirm = await vscode.window.showWarningMessage(confirmMessage, { modal: true }, '确定')
 
