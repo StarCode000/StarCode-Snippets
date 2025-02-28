@@ -52,11 +52,7 @@
       {
         "command": "starcode-snippets.rename",
         "title": "重命名",
-        "category": "StarCode Snippets",
-        "icon": {
-          "light": "./assets/img/actions/rename-black.png",
-          "dark": "./assets/img/actions/rename-white.png"
-        }
+        "category": "StarCode Snippets"
       },
       {
         "command": "starcode-snippets.createDirectory",
@@ -66,38 +62,22 @@
       {
         "command": "starcode-snippets.appendCode",
         "title": "粘贴代码",
-        "category": "StarCode Snippets",
-        "icon": {
-          "light": "./assets/img/actions/paste-black.png",
-          "dark": "./assets/img/actions/paste-white.png"
-        }
+        "category": "StarCode Snippets"
       },
       {
         "command": "starcode-snippets.editSnippet",
         "title": "编辑代码",
-        "category": "StarCode Snippets",
-        "icon": {
-          "light": "./assets/img/actions/edit-black.png",
-          "dark": "./assets/img/actions/edit-white.png"
-        }
+        "category": "StarCode Snippets"
       },
       {
         "command": "starcode-snippets.delete",
         "title": "删除",
-        "category": "StarCode Snippets",
-        "icon": {
-          "light": "./assets/img/actions/delete-black.png",
-          "dark": "./assets/img/actions/delete-white.png"
-        }
+        "category": "StarCode Snippets"
       },
       {
         "command": "starcode-snippets.moveToDirectory",
         "title": "移动到目录",
-        "category": "StarCode Snippets",
-        "icon": {
-          "light": "./assets/img/actions/move-black.png",
-          "dark": "./assets/img/actions/move-white.png"
-        }
+        "category": "StarCode Snippets"
       },
       {
         "command": "starcode-snippets.createSnippetInDirectory",
