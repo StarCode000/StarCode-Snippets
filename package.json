@@ -9,9 +9,9 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.0.9",
+  "version": "0.1.0",
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.15.0"
   },
   "categories": [
     "Snippets"
@@ -117,7 +117,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
-    "@types/vscode": "^1.97.0",
+    "@types/vscode": "^1.15.0",
     "@typescript-eslint/eslint-plugin": "^8.22.0",
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
