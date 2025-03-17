@@ -74,7 +74,7 @@ export class SnippetWebviewProvider {
   }
 
   private async _getSnippetsAndDirectories() {
-    if (!this._view) return
+    if (!this._view) {return}
 
     const [directories, snippets] = await Promise.all([
       this._storageManager.getAllDirectories(),

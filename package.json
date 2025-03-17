@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -111,7 +111,7 @@
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
-    "lint": "eslint src",
+    "lint": "eslint src --fix",
     "test": "vscode-test"
   },
   "devDependencies": {

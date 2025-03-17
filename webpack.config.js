@@ -44,6 +44,10 @@ const extensionConfig = {
         {
           from: 'node_modules/monaco-editor/min',
           to: 'monaco-editor'
+        },
+        {
+          from: 'media',
+          to: 'media'
         }
       ]
     })
