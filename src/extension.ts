@@ -204,7 +204,7 @@ export function activate(context: vscode.ExtensionContext) {
   let previewSnippet = vscode.commands.registerCommand(
     'starcode-snippets.previewSnippet',
     async (snippet: CodeSnippet) => {
-      if (!snippet) return
+      if (!snippet) {return}
 
       // 创建并显示webview
       const panel = vscode.window.createWebviewPanel(
@@ -223,91 +223,134 @@ export function activate(context: vscode.ExtensionContext) {
       
       // 生成HTML内容
       panel.webview.html = getPreviewHtml(snippet.code, language, snippet.name);
+
+      // 生成预览HTML
+      function getPreviewHtml(code: string, language: string, snippetName: string): string {
+        // 转义HTML特殊字符
+        const escapedCode = code
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+
+        // 获取本地资源的URI
+        const highlightJsUri = panel.webview.asWebviewUri(
+          vscode.Uri.joinPath(context.extensionUri, 'media', 'highlight', 'highlight.min.js')
+        );
+        const cssUri = panel.webview.asWebviewUri(
+          vscode.Uri.joinPath(context.extensionUri, 'media', 'highlight', 'vs2015.min.css')
+        );
+
+        return `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>代码片段预览</title>
+            <link rel="stylesheet" href="${cssUri}">
+            <script src="${highlightJsUri}"></script>
+            <style>
+                body {
+                    padding: 16px;
+                    color: var(--vscode-foreground);
+                    font-family: var(--vscode-editor-font-family);
+                    font-size: var(--vscode-editor-font-size);
+                    background-color: var(--vscode-editor-background);
+                }
+                .header {
+                    margin-bottom: 16px;
+                    padding-bottom: 8px;
+                    border-bottom: 1px solid var(--vscode-panel-border);
+                }
+                .title {
+                    font-size: 1.2em;
+                    font-weight: bold;
+                    margin: 0;
+                    padding: 0;
+                }
+                .language-badge {
+                    display: inline-block;
+                    background-color: var(--vscode-badge-background);
+                    color: var(--vscode-badge-foreground);
+                    border-radius: 4px;
+                    padding: 2px 6px;
+                    font-size: 0.8em;
+                    margin-left: 8px;
+                }
+                pre {
+                    margin: 0;
+                    padding: 16px;
+                    border-radius: 4px;
+                    overflow: auto;
+                    background-color: var(--vscode-editor-background);
+                }
+                code {
+                    font-family: var(--vscode-editor-font-family), 'Courier New', monospace;
+                    tab-size: 4;
+                }
+                .hljs {
+                    background-color: var(--vscode-editor-background) !important;
+                }
+                /* 添加基本的语法高亮样式，以防highlight.js无法加载 */
+                .token.keyword { color: #569CD6; }
+                .token.string { color: #CE9178; }
+                .token.comment { color: #6A9955; }
+                .token.function { color: #DCDCAA; }
+                .token.number { color: #B5CEA8; }
+                .token.operator { color: #D4D4D4; }
+                .token.class-name { color: #4EC9B0; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="title">
+                    ${snippetName}
+                    <span class="language-badge">${language}</span>
+                </div>
+            </div>
+            <pre><code class="language-${getHighlightJsLanguage(language)}">${escapedCode}</code></pre>
+            <script>
+                // 添加简单的降级方案，以防highlight.js无法正常工作
+                function simpleHighlight(code, language) {
+                    if (typeof hljs !== 'undefined') {
+                        try {
+                            hljs.highlightAll();
+                            return;
+                        } catch (e) {
+                            console.error('Highlight.js error:', e);
+                        }
+                    }
+                    
+                    // 简单的语法高亮降级方案
+                    const codeElement = document.querySelector('code');
+                    if (!codeElement) return;
+                    
+                    // 简单的关键字高亮
+                    const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 'return', 'class', 'import', 'export', 'from'];
+                    let html = codeElement.innerHTML;
+                    
+                    // 高亮关键字
+                    keywords.forEach(keyword => {
+                        const regex = new RegExp('\\b' + keyword + '\\b', 'g');
+                        html = html.replace(regex, '<span class="token keyword">' + keyword + '</span>');
+                    });
+                    
+                    codeElement.innerHTML = html;
+                }
+                
+                document.addEventListener('DOMContentLoaded', () => {
+                    simpleHighlight(document.querySelector('code').textContent, '${language}');
+                });
+                
+                // 立即尝试高亮
+                simpleHighlight(document.querySelector('code').textContent, '${language}');
+            </script>
+        </body>
+        </html>`;
+      }
     }
   )
-
-  // 生成预览HTML
-  function getPreviewHtml(code: string, language: string, snippetName: string): string {
-    // 转义HTML特殊字符
-    const escapedCode = code
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>代码片段预览</title>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/vs2015.min.css">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/${getHighlightJsLanguage(language)}.min.js"></script>
-        <style>
-            body {
-                padding: 16px;
-                color: var(--vscode-foreground);
-                font-family: var(--vscode-editor-font-family);
-                font-size: var(--vscode-editor-font-size);
-                background-color: var(--vscode-editor-background);
-            }
-            .header {
-                margin-bottom: 16px;
-                padding-bottom: 8px;
-                border-bottom: 1px solid var(--vscode-panel-border);
-            }
-            .title {
-                font-size: 1.2em;
-                font-weight: bold;
-                margin: 0;
-                padding: 0;
-            }
-            .language-badge {
-                display: inline-block;
-                background-color: var(--vscode-badge-background);
-                color: var(--vscode-badge-foreground);
-                border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 0.8em;
-                margin-left: 8px;
-            }
-            pre {
-                margin: 0;
-                padding: 16px;
-                border-radius: 4px;
-                overflow: auto;
-                background-color: var(--vscode-editor-background);
-            }
-            code {
-                font-family: var(--vscode-editor-font-family), 'Courier New', monospace;
-                tab-size: 4;
-            }
-            .hljs {
-                background-color: var(--vscode-editor-background) !important;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <div class="title">
-                ${snippetName}
-                <span class="language-badge">${language}</span>
-            </div>
-        </div>
-        <pre><code class="language-${getHighlightJsLanguage(language)}">${escapedCode}</code></pre>
-        <script>
-            document.addEventListener('DOMContentLoaded', (event) => {
-                document.querySelectorAll('pre code').forEach((block) => {
-                    hljs.highlightElement(block);
-                });
-            });
-            hljs.highlightAll();
-        </script>
-    </body>
-    </html>`;
-  }
 
   // 将VSCode语言ID转换为highlight.js支持的语言ID
   function getHighlightJsLanguage(language: string): string {
@@ -338,7 +381,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 重命名命令
   let renameItem = vscode.commands.registerCommand('starcode-snippets.rename', async (item: any) => {
-    if (!item) return
+    if (!item) {return}
 
     const newName = await vscode.window.showInputBox({
       prompt: '重命名...',
@@ -399,7 +442,7 @@ export function activate(context: vscode.ExtensionContext) {
   let createSnippetInDirectory = vscode.commands.registerCommand(
     'starcode-snippets.createSnippetInDirectory',
     async (item: any) => {
-      if (!item?.directory) return
+      if (!item?.directory) {return}
 
       const name = await vscode.window.showInputBox({
         prompt: '输入代码片段名称',
@@ -441,7 +484,7 @@ export function activate(context: vscode.ExtensionContext) {
           placeHolder: '选择代码语言',
         })
 
-        if (!selectedLanguage) return // 用户取消了选择
+        if (!selectedLanguage) {return} // 用户取消了选择
 
         // 根据选择的语言设置文件名
         let fileName = 'snippet'
@@ -532,7 +575,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 删除命令
   let deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: any) => {
-    if (!item) return
+    if (!item) {return}
 
     const confirmMessage = item.snippet
       ? `确定要删除代码片段 "${item.snippet.name}" 吗？`
@@ -552,7 +595,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 追加粘贴命令
   let appendCode = vscode.commands.registerCommand('starcode-snippets.appendCode', async (item: any) => {
-    if (!item?.snippet) return
+    if (!item?.snippet) {return}
 
     const editor = vscode.window.activeTextEditor
     if (editor) {
@@ -565,7 +608,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 编辑代码命令
   let editSnippet = vscode.commands.registerCommand('starcode-snippets.editSnippet', async (item: any) => {
-    if (!item?.snippet) return
+    if (!item?.snippet) {return}
 
     const updatedSnippet = await SnippetEditor.edit(item.snippet)
     if (updatedSnippet) {
@@ -576,7 +619,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 移动到目录命令
   let moveToDirectory = vscode.commands.registerCommand('starcode-snippets.moveToDirectory', async (item: any) => {
-    if (!item?.snippet) return
+    if (!item?.snippet) {return}
 
     const directories = await storageManager.getAllDirectories()
     const directoryItems = [
