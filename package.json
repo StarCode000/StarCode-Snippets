@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -32,8 +32,7 @@
       "starcode-snippets-container": [
         {
           "id": "copyCodeExplorer",
-          "name": "代码库",
-          "type": "webview"
+          "name": "代码库"
         }
       ]
     },
@@ -52,38 +51,56 @@
       {
         "command": "starcode-snippets.rename",
         "title": "重命名",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(edit)"
       },
       {
         "command": "starcode-snippets.createDirectory",
         "title": "新建目录",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(new-folder)"
       },
       {
         "command": "starcode-snippets.appendCode",
         "title": "粘贴代码",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(clippy)"
       },
       {
         "command": "starcode-snippets.editSnippet",
         "title": "编辑代码",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(edit)"
       },
       {
         "command": "starcode-snippets.delete",
         "title": "删除",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(trash)"
       },
       {
         "command": "starcode-snippets.moveToDirectory",
         "title": "移动到目录",
-        "category": "StarCode Snippets"
+        "category": "StarCode Snippets",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "starcode-snippets.createSnippetInDirectory",
         "title": "新建代码片段",
         "category": "StarCode Snippets",
         "icon": "$(add)"
+      },
+      {
+        "command": "starcode-snippets.finishEditing",
+        "title": "完成编辑",
+        "category": "StarCode Snippets",
+        "icon": "$(check)"
+      },
+      {
+        "command": "starcode-snippets.previewSnippet",
+        "title": "预览代码片段",
+        "category": "StarCode Snippets",
+        "icon": "$(eye)"
       }
     ],
     "menus": {
@@ -92,6 +109,97 @@
           "command": "starcode-snippets.saveToLibrary",
           "when": "editorHasSelection",
           "group": "9_cutcopypaste"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "starcode-snippets.finishEditing",
+          "group": "navigation",
+          "when": "starcode-snippets.isEditingSnippet"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "starcode-snippets.refreshExplorer",
+          "when": "view == copyCodeExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "starcode-snippets.createDirectory",
+          "when": "view == copyCodeExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "starcode-snippets.createSnippetInDirectory",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.createSnippetInDirectory",
+          "when": "view == copyCodeExplorer && viewItem == directory",
+          "group": "1_creation@1"
+        },
+        {
+          "command": "starcode-snippets.appendCode",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.editSnippet",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.previewSnippet",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.moveToDirectory",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.appendCode",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "3_snippetactions@1"
+        },
+        {
+          "command": "starcode-snippets.editSnippet",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "3_snippetactions@2"
+        },
+        {
+          "command": "starcode-snippets.previewSnippet",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "3_snippetactions@3"
+        },
+        {
+          "command": "starcode-snippets.moveToDirectory",
+          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "group": "4_organization@1"
+        },
+        {
+          "command": "starcode-snippets.rename",
+          "when": "view == copyCodeExplorer",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == copyCodeExplorer",
+          "group": "inline"
+        },
+        {
+          "command": "starcode-snippets.rename",
+          "when": "view == copyCodeExplorer",
+          "group": "2_modification@1"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == copyCodeExplorer",
+          "group": "2_modification@2"
         }
       ]
     },
