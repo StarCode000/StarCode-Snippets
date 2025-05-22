@@ -1,28 +1,27 @@
 import * as vscode from 'vscode';
 import { StorageManager } from './storage/storageManager';
-import { SnippetWebviewProvider } from './explorer/webviewProvider';
 import { v4 as uuidv4 } from 'uuid';
 import { CodeSnippet, Directory } from './models/types';
 import { SnippetEditor } from './editor/snippetEditor';
+import { SnippetsTreeDataProvider } from './explorer/treeProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.time('starcode-snippets:activate');
   
   // 创建存储管理器
   const storageManager = new StorageManager(context);
-  const webviewProvider = new SnippetWebviewProvider(context.extensionUri, storageManager);
-
-  // 立即注册webview以提供UI响应
-  const webviewView = vscode.window.registerWebviewViewProvider(
-    'copyCodeExplorer',
-    webviewProvider,
-    {
-      webviewOptions: {
-        // 设置保留webview上下文，提高响应速度
-        retainContextWhenHidden: true
-      }
-    }
-  );
+  
+  // 创建树视图数据提供程序
+  const treeDataProvider = new SnippetsTreeDataProvider(storageManager);
+  
+  // 注册树视图
+  const treeView = vscode.window.createTreeView('copyCodeExplorer', {
+    treeDataProvider: treeDataProvider,
+    showCollapseAll: true
+  });
+  
+  // 将树视图添加到上下文订阅中
+  context.subscriptions.push(treeView);
   
   // 注册虚拟文档内容提供者，用于预览代码片段
   TextDocumentContentProvider.register(context);
@@ -32,9 +31,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // 初始化代码片段编辑器，传入存储管理器
     const snippetEditor = SnippetEditor.initialize(context, storageManager);
     
-    // 监听SnippetEditor的保存事件，以便刷新WebView
+    // 监听SnippetEditor的保存事件，以便刷新视图
     snippetEditor.onDidSaveSnippet(() => {
-      webviewProvider.refresh();
+      treeDataProvider.refresh();
     });
     
     // 注册完成编辑命令
@@ -49,23 +48,20 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(finishEditing);
     
     // 注册所有命令
-    const commands = registerCommands(context, storageManager, webviewProvider);
+    const commands = registerCommands(context, storageManager, treeDataProvider);
     
-    // 添加到订阅中
-    context.subscriptions.push(
-      webviewView,
-      ...commands
-    );
+    // 添加命令到订阅中
+    context.subscriptions.push(...commands);
     
     console.timeEnd('starcode-snippets:activate');
-  }, 1000);
+  }, 500); // 缩短延迟时间
 }
 
 // 将命令注册逻辑分离出来，便于延迟加载
 function registerCommands(
   context: vscode.ExtensionContext, 
   storageManager: StorageManager, 
-  webviewProvider: SnippetWebviewProvider
+  treeDataProvider: SnippetsTreeDataProvider
 ): vscode.Disposable[] {
   // 插入代码片段的通用函数
   async function insertSnippet(snippet: CodeSnippet): Promise<boolean> {
@@ -263,7 +259,7 @@ function registerCommands(
             };
 
             await storageManager.saveSnippet(snippet);
-            webviewProvider.refresh();
+            treeDataProvider.refresh();
           }
         }
       }
@@ -277,13 +273,35 @@ function registerCommands(
       if (!snippet) {return;}
 
       try {
-      // 获取代码语言
-      const language = snippet.language || snippet.fileName.split('.').pop() || 'plaintext';
-      
-        // 创建虚拟文档URI - 使用自定义scheme，添加UUID确保唯一性
+        // 获取代码语言 - 修复可能的 undefined.split() 错误
+        const language = snippet.language || 
+                       (snippet.fileName ? snippet.fileName.split('.').pop() : '') || 
+                       'plaintext';
+        
+        // 检查该代码片段是否已有预览窗口
+        if (TextDocumentContentProvider.instance) {
+          const existingPreviewUri = TextDocumentContentProvider.instance.getOpenPreviewUri(snippet.id);
+          if (existingPreviewUri) {
+            // 如果已经有预览窗口，找到对应的编辑器并激活它
+            for (const editor of vscode.window.visibleTextEditors) {
+              if (editor.document.uri.toString() === existingPreviewUri.toString()) {
+                // 激活该编辑器
+                await vscode.window.showTextDocument(editor.document, {
+                  viewColumn: editor.viewColumn,
+                  preserveFocus: false,
+                  preview: true
+                });
+                return; // 已经显示了现有的预览，不需要创建新的
+              }
+            }
+            // 如果找不到对应的编辑器（可能已经关闭），从跟踪中移除
+            TextDocumentContentProvider.instance.setOpenPreview(snippet.id, undefined);
+          }
+        }
+        
+        // 创建虚拟文档URI - 使用自定义scheme，添加片段ID确保唯一性
         const scheme = 'starcode-preview';
-        const uniqueId = uuidv4().substring(0, 8);  // 使用较短的UUID
-        const uri = vscode.Uri.parse(`${scheme}:${snippet.name}_${uniqueId}.${language}`);
+        const uri = vscode.Uri.parse(`${scheme}:${snippet.name}_${snippet.id}.${language}`);
 
         // 注册文档内容提供者(如果还没注册)
         if (!TextDocumentContentProvider.instance) {
@@ -291,7 +309,10 @@ function registerCommands(
         }
         
         // 设置当前预览内容
-        TextDocumentContentProvider.instance.update(uri, snippet.code, language);
+        TextDocumentContentProvider.instance.update(uri, snippet.code || '', language);
+        
+        // 记录这个代码片段的预览URI
+        TextDocumentContentProvider.instance.setOpenPreview(snippet.id, uri);
         
         // 打开文档
         const document = await vscode.workspace.openTextDocument(uri);
@@ -307,15 +328,15 @@ function registerCommands(
             if (language === 'vue') {
               await vscode.languages.setTextDocumentLanguage(document, 'html');
             }
-                        }
-                    }
+          }
+        }
                     
         // 显示文档
         await vscode.window.showTextDocument(document, {
           viewColumn: vscode.ViewColumn.Beside,
           preserveFocus: false,
           preview: true
-                });
+        });
                 
         // 设置编辑器标题
         vscode.window.showInformationMessage(`预览: ${snippet.name}`);
@@ -323,7 +344,7 @@ function registerCommands(
       } catch (error) {
         console.error('预览失败:', error);
         vscode.window.showErrorMessage(`预览代码片段失败: ${error}`);
-  }
+      }
     }
   );
 
@@ -358,7 +379,7 @@ function registerCommands(
           const updatedDirectory = { ...item.directory, name: newName };
           await storageManager.updateDirectory(updatedDirectory);
       }
-        webviewProvider.refresh();
+        treeDataProvider.refresh();
     }
     }
   );
@@ -387,7 +408,7 @@ function registerCommands(
         order: 0,
         };
         await storageManager.createDirectory(directory);
-        webviewProvider.refresh();
+        treeDataProvider.refresh();
       }
     }
   );
@@ -515,7 +536,7 @@ function registerCommands(
         };
 
         await storageManager.saveSnippet(snippet);
-        webviewProvider.refresh();
+        treeDataProvider.refresh();
 
         // 打开编辑器编辑代码片段
         try {
@@ -547,7 +568,7 @@ function registerCommands(
       } else if (item.directory) {
           await storageManager.deleteDirectory(item.directory.id);
         }
-        webviewProvider.refresh();
+        treeDataProvider.refresh();
       }
     }
   );
@@ -615,7 +636,7 @@ function registerCommands(
         category: selectedDirectory.label,
         };
         await storageManager.updateSnippet(updatedSnippet);
-        webviewProvider.refresh();
+        treeDataProvider.refresh();
       }
     }
   );
@@ -632,7 +653,7 @@ function registerCommands(
   const refreshExplorer = vscode.commands.registerCommand(
     'starcode-snippets.refreshExplorer', 
     () => {
-      webviewProvider.refresh();
+      treeDataProvider.refresh();
       console.log('刷新视图');
       vscode.window.showInformationMessage('代码库已刷新');
     }
@@ -665,6 +686,8 @@ class TextDocumentContentProvider implements vscode.TextDocumentContentProvider 
   private contents = new Map<string, string>();
   private languages = new Map<string, string>();
   private maxCachedEntries = 50; // 最多缓存多少条预览记录
+  // 添加已打开预览的跟踪
+  private openPreviewsBySnippetId = new Map<string, vscode.Uri>();
   
   public static register(context: vscode.ExtensionContext): vscode.Disposable {
     TextDocumentContentProvider.instance = new TextDocumentContentProvider();
@@ -705,6 +728,14 @@ class TextDocumentContentProvider implements vscode.TextDocumentContentProvider 
     for (const uri of unusedUris) {
       this.contents.delete(uri);
       this.languages.delete(uri);
+      
+      // 从已打开预览中移除
+      for (const [snippetId, previewUri] of this.openPreviewsBySnippetId.entries()) {
+        if (previewUri.toString() === uri) {
+          this.openPreviewsBySnippetId.delete(snippetId);
+          break;
+        }
+      }
     }
     
     // 如果缓存太大，移除最旧的条目
@@ -715,6 +746,20 @@ class TextDocumentContentProvider implements vscode.TextDocumentContentProvider 
         this.contents.delete(uri);
         this.languages.delete(uri);
       }
+    }
+  }
+  
+  // 添加获取已打开预览的方法
+  public getOpenPreviewUri(snippetId: string): vscode.Uri | undefined {
+    return this.openPreviewsBySnippetId.get(snippetId);
+  }
+  
+  // 添加设置已打开预览的方法
+  public setOpenPreview(snippetId: string, uri: vscode.Uri | undefined): void {
+    if (uri) {
+      this.openPreviewsBySnippetId.set(snippetId, uri);
+    } else {
+      this.openPreviewsBySnippetId.delete(snippetId);
     }
   }
   
