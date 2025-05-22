@@ -84,6 +84,12 @@
         "title": "新建代码片段",
         "category": "StarCode Snippets",
         "icon": "$(add)"
+      },
+      {
+        "command": "starcode-snippets.finishEditing",
+        "title": "完成编辑",
+        "category": "StarCode Snippets",
+        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -92,6 +98,13 @@
           "command": "starcode-snippets.saveToLibrary",
           "when": "editorHasSelection",
           "group": "9_cutcopypaste"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "starcode-snippets.finishEditing",
+          "group": "navigation",
+          "when": "starcode-snippets.isEditingSnippet"
         }
       ]
     },

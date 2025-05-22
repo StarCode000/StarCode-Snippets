@@ -5,9 +5,31 @@ import { CodeSnippet, Directory } from '../models/types'
 export class SnippetWebviewProvider {
   private _view?: vscode.WebviewView
   private _storageManager: StorageManager
+  private _cachedDirectories: Directory[] = [] 
+  private _cachedSnippets: CodeSnippet[] = []
+  private _isInitialized: boolean = false
+  private _isRendering: boolean = false
+  private _pendingRefresh: boolean = false
 
   constructor(private readonly _extensionUri: vscode.Uri, storageManager: StorageManager) {
     this._storageManager = storageManager
+    // 在构造函数中预加载数据
+    this._preloadData()
+  }
+
+  // 预加载数据方法
+  private async _preloadData() {
+    try {
+      // 异步预加载数据
+      const [directories, snippets] = await Promise.all([
+        this._storageManager.getAllDirectories(),
+        this._storageManager.getAllSnippets()
+      ])
+      this._cachedDirectories = directories
+      this._cachedSnippets = snippets
+    } catch (error) {
+      console.error('预加载数据失败:', error)
+    }
   }
 
   public resolveWebviewView(
@@ -22,7 +44,8 @@ export class SnippetWebviewProvider {
       localResourceRoots: [this._extensionUri]
     }
 
-    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview)
+    // 立即设置框架HTML结构，不等待数据加载
+    webviewView.webview.html = this._getSkeletonHtmlForWebview(webviewView.webview)
 
     // 处理来自webview的消息
     webviewView.webview.onDidReceiveMessage(async (data) => {
@@ -66,30 +89,96 @@ export class SnippetWebviewProvider {
             label: data.name
           })
           break
+        case 'ready': 
+          // 当webview通知已准备好加载数据时
+          this._sendCachedDataOrRefresh()
+          break
+        case 'renderComplete':
+          // 渲染完成时更新状态
+          this._isRendering = false
+          if (this._pendingRefresh) {
+            this._pendingRefresh = false
+            this._sendCachedDataOrRefresh()
+          }
+          break
       }
     })
 
-    // 初始加载数据
-    this._getSnippetsAndDirectories()
+    // 主体结构已经设置好，现在可以开始异步加载数据
+    // 延迟50ms，确保框架已渲染
+    setTimeout(() => {
+      this._sendCachedDataOrRefresh()
+    }, 50)
+  }
+
+  // 发送缓存的数据或刷新数据
+  private _sendCachedDataOrRefresh() {
+    if (!this._view) {return}
+    
+    // 如果正在渲染，标记为待刷新并返回
+    if (this._isRendering) {
+      this._pendingRefresh = true
+      return
+    }
+    
+    this._isRendering = true
+    
+    if (this._cachedDirectories.length > 0 || this._cachedSnippets.length > 0) {
+      // 如果有缓存数据，直接发送
+      this._view.webview.postMessage({
+        type: 'updateData',
+        directories: this._cachedDirectories,
+        snippets: this._cachedSnippets
+      })
+      this._isInitialized = true
+    } else {
+      // 否则刷新数据
+      this._getSnippetsAndDirectories()
+    }
   }
 
   private async _getSnippetsAndDirectories() {
     if (!this._view) {return}
 
-    const [directories, snippets] = await Promise.all([
-      this._storageManager.getAllDirectories(),
-      this._storageManager.getAllSnippets()
-    ])
+    try {
+      // 如果正在渲染，标记为待刷新并返回
+      if (this._isRendering) {
+        this._pendingRefresh = true
+        return
+      }
+      
+      this._isRendering = true
+      
+      // 通知webview开始加载数据
+      this._view.webview.postMessage({
+        type: 'startLoading'
+      })
 
-    // 发送数据到webview
-    this._view.webview.postMessage({
-      type: 'updateData',
-      directories,
-      snippets
-    })
+      const [directories, snippets] = await Promise.all([
+        this._storageManager.getAllDirectories(),
+        this._storageManager.getAllSnippets()
+      ])
+
+      // 更新缓存
+      this._cachedDirectories = directories
+      this._cachedSnippets = snippets
+      this._isInitialized = true
+
+      // 发送数据到webview
+      this._view.webview.postMessage({
+        type: 'updateData',
+        directories,
+        snippets
+      })
+    } catch (error) {
+      console.error('获取数据失败:', error)
+      vscode.window.showErrorMessage(`加载代码片段失败: ${error}`)
+      this._isRendering = false
+    }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview) {
+  // 返回最基本的HTML骨架，仅包含UI框架
+  private _getSkeletonHtmlForWebview(webview: vscode.Webview) {
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -111,82 +200,13 @@ export class SnippetWebviewProvider {
             .container {
                 padding: 10px;
             }
-            .directory-container {
-                margin: 2px 0;
-            }
-            .directory {
-                height: 24px;
-                padding: 5px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                border-radius: 3px;
-            }
-            .directory:hover {
-                background-color: var(--vscode-list-hoverBackground);
-            }
-            .directory-icon {
-                margin-right: 5px;
-                color: var(--vscode-symbolIcon-folderForeground);
-                transition: transform 0.2s;
-                transform: rotate(45deg);
-            }
-            .directory.collapsed .directory-icon {
-                transform: rotate(-45deg);
-            }
-            .directory-children {
-                margin-left: 20px;
-                display: block;
-                transition: height 0.2s;
-            }
-            .directory.collapsed + .directory-children {
-                display: none;
-            }
-            .snippet {
-                height: 24px;
-                padding: 5px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                border-radius: 3px;
-                margin: 2px 0;
-            }
-            .snippet:hover {
-                background-color: var(--vscode-list-hoverBackground);
-            }
-            .snippet-icon {
-                margin-right: 5px;
-                color: var(--vscode-symbolIcon-variableForeground);
-            }
-            .actions {
-                margin-left: auto;
-                display: none;
-            }
-            .directory:hover .actions,
-            .snippet:hover .actions {
-                display: flex;
-            }
-            .action-button {
-                border-radius: 3px;
-                padding: 2px;
-                margin-left: 4px;
-                cursor: pointer;
-                border: none;
-                background: none;
-                color: var(--vscode-foreground);
-                transition: 0.4s;
-            }
-            .action-button:hover {
-                color: var(--vscode-button-foreground);
-                background-color: var(--vscode-button-background);
-                box-shadow: 0 0 2px var(--vscode-button-hoverBackground);
-            }
             .toolbar {
                 border: 2px solid var(--vscode-button-background);
                 border-radius: 6px;
                 padding: 5px;
                 display: flex;
                 justify-content: flex-end;
+                margin-bottom: 10px;
             }
             .toolbar button {
                 margin-left: 5px;
@@ -202,6 +222,39 @@ export class SnippetWebviewProvider {
             .toolbar button:hover {
                 background-color: var(--vscode-button-hoverBackground);
             }
+            .loading {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100px;
+                flex-direction: column;
+            }
+            @keyframes pulse {
+                0% { opacity: 0.6; }
+                50% { opacity: 1; }
+                100% { opacity: 0.6; }
+            }
+            .skeleton-item {
+                height: 24px;
+                margin: 6px 0;
+                background-color: var(--vscode-button-background);
+                opacity: 0.3;
+                border-radius: 3px;
+                animation: pulse 1.5s infinite;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            .spinner {
+                border: 3px solid rgba(0, 0, 0, 0.1);
+                border-radius: 50%;
+                border-top: 3px solid var(--vscode-progressBar-background);
+                width: 20px;
+                height: 20px;
+                animation: spin 1s linear infinite;
+                margin-bottom: 8px;
+            }
         </style>
     </head>
     <body>
@@ -210,7 +263,15 @@ export class SnippetWebviewProvider {
                 <button onclick="refreshContent()" title="刷新代码库">🔄 刷新</button>
                 <button onclick="createDirectory()" title="新建目录">📁 新建目录</button>
             </div>
-            <div id="content"></div>
+            <div id="content">
+                <!-- 占位骨架屏 -->
+                <div class="skeleton-item" style="width: 60%;"></div>
+                <div class="skeleton-item" style="width: 70%; margin-left: 20px;"></div>
+                <div class="skeleton-item" style="width: 65%; margin-left: 20px;"></div>
+                <div class="skeleton-item" style="width: 80%;"></div>
+                <div class="skeleton-item" style="width: 55%; margin-left: 20px;"></div>
+                <div class="skeleton-item" style="width: 75%;"></div>
+            </div>
         </div>
         <script>
             document.addEventListener('contextmenu', function(event) {
@@ -219,75 +280,228 @@ export class SnippetWebviewProvider {
             const vscode = acquireVsCodeApi();
             let directories = [];
             let snippets = [];
+            let isRendering = false;
+            let pendingData = null;
 
-            // 初始化时请求数据
-            vscode.postMessage({ type: 'getSnippets' });
+            // 告诉扩展webview已准备好接收数据
+            window.addEventListener('load', () => {
+                vscode.postMessage({ type: 'ready' });
+            });
 
             // 监听来自扩展的消息
             window.addEventListener('message', event => {
                 const message = event.data;
                 switch (message.type) {
+                    case 'startLoading':
+                        showLoadingIndicator();
+                        break;
                     case 'updateData':
+                        if (isRendering) {
+                            // 如果正在渲染，存储数据等待稍后处理
+                            pendingData = message;
+                            return;
+                        }
+                        isRendering = true;
                         directories = message.directories;
                         snippets = message.snippets;
-                        renderContent();
+                        
+                        // 使用requestAnimationFrame确保在下一帧渲染
+                        requestAnimationFrame(() => {
+                            renderContent();
+                            // 通知扩展渲染完成
+                            setTimeout(() => {
+                                isRendering = false;
+                                vscode.postMessage({ type: 'renderComplete' });
+                                
+                                // 处理待处理的数据
+                                if (pendingData) {
+                                    const data = pendingData;
+                                    pendingData = null;
+                                    
+                                    // 递归处理
+                                    window.dispatchEvent(new MessageEvent('message', {
+                                        data: data
+                                    }));
+                                }
+                            }, 50);
+                        });
                         break;
                 }
             });
 
+            function showLoadingIndicator() {
+                const content = document.getElementById('content');
+                content.innerHTML = '<div class="loading"><div class="spinner"></div><div>正在加载数据...</div></div>';
+            }
+
+            // 优化的渲染函数，分批次渲染大量数据
             function renderContent() {
                 const content = document.getElementById('content');
-                content.innerHTML = '';
+                content.innerHTML = ''; // 清空内容
+                
+                // 分批次渲染以提高性能
+                setTimeout(() => {
+                    // 创建一个文档片段来存储所有要渲染的元素
+                    const fragment = document.createDocumentFragment();
+                    
+                    // 渲染根级别的代码片段
+                    const rootSnippets = snippets.filter(s => s.parentId === null);
+                    if (rootSnippets.length > 0) {
+                        rootSnippets
+                            .sort((a, b) => a.order - b.order)
+                            .forEach(snippet => {
+                                fragment.appendChild(createSnippetElement(snippet));
+                            });
+                    }
 
-                function renderDirectory(parentId, container) {
-                    // 渲染当前层级的目录
-                    directories
-                        .filter(dir => dir.parentId === parentId)
-                        .sort((a, b) => a.order - b.order)
-                        .forEach(dir => {
-                            const dirContainer = document.createElement('div');
-                            dirContainer.className = 'directory-container';
-                            
-                            const dirElement = createDirectoryElement(dir);
-                            dirContainer.appendChild(dirElement);
-                            
-                            const childrenContainer = document.createElement('div');
-                            childrenContainer.className = 'directory-children';
-                            
-                            // 递归渲染子目录
-                            renderDirectory(dir.id, childrenContainer);
-                            
-                            // 渲染当前目录下的代码片段
-                            snippets
-                                .filter(s => s.parentId === dir.id)
-                                .sort((a, b) => a.order - b.order)
-                                .forEach(snippet => {
-                                    childrenContainer.appendChild(createSnippetElement(snippet));
-                                });
-                            
-                            dirContainer.appendChild(childrenContainer);
-                            container.appendChild(dirContainer);
-                        });
-                }
-
-                // 渲染根级别的代码片段
-                snippets
-                    .filter(s => s.parentId === null)
-                    .sort((a, b) => a.order - b.order)
-                    .forEach(snippet => {
-                        content.appendChild(createSnippetElement(snippet));
-                    });
-
-                // 从根级别开始渲染目录树
-                renderDirectory(null, content);
+                    // 渲染目录树，使用批量处理
+                    batchRenderDirectory(null, fragment);
+                    
+                    // 一次性添加完整的文档片段
+                    content.appendChild(fragment);
+                }, 0);
             }
+
+            // 批量渲染目录，提高性能
+            function batchRenderDirectory(parentId, container) {
+                // 获取当前层级的目录
+                const currentLevelDirs = directories
+                    .filter(dir => dir.parentId === parentId)
+                    .sort((a, b) => a.order - b.order);
+                
+                // 如果没有目录，直接返回
+                if (currentLevelDirs.length === 0) {
+                    return;
+                }
+                
+                currentLevelDirs.forEach(dir => {
+                    const dirContainer = document.createElement('div');
+                    dirContainer.className = 'directory-container';
+                    
+                    const dirElement = createDirectoryElement(dir);
+                    dirContainer.appendChild(dirElement);
+                    
+                    const childrenContainer = document.createElement('div');
+                    childrenContainer.className = 'directory-children';
+                    
+                    // 获取当前目录下的所有代码片段
+                    const dirSnippets = snippets.filter(s => s.parentId === dir.id);
+                    
+                    // 添加代码片段
+                    if (dirSnippets.length > 0) {
+                        dirSnippets
+                            .sort((a, b) => a.order - b.order)
+                            .forEach(snippet => {
+                                childrenContainer.appendChild(createSnippetElement(snippet));
+                            });
+                    }
+                    
+                    // 递归渲染子目录
+                    batchRenderDirectory(dir.id, childrenContainer);
+                    
+                    dirContainer.appendChild(childrenContainer);
+                    container.appendChild(dirContainer);
+                });
+            }
+
+            // 定义样式一次，避免重复创建
+            const directoryStyles = 
+                '.directory {' +
+                '    height: 24px;' +
+                '    padding: 5px;' +
+                '    cursor: pointer;' +
+                '    display: flex;' +
+                '    align-items: center;' +
+                '    border-radius: 3px;' +
+                '    position: relative;' +
+                '}' +
+                '.directory:hover {' +
+                '    background-color: var(--vscode-list-hoverBackground);' +
+                '}' +
+                '.directory-icon {' +
+                '    margin-right: 5px;' +
+                '    color: var(--vscode-symbolIcon-folderForeground);' +
+                '    transition: transform 0.2s;' +
+                '    transform: rotate(45deg);' +
+                '}' +
+                '.directory.collapsed .directory-icon {' +
+                '    transform: rotate(-45deg);' +
+                '}' +
+                '.directory-children {' +
+                '    margin-left: 20px;' +
+                '    display: block;' +
+                '    transition: height 0.2s;' +
+                '}' +
+                '.directory.collapsed + .directory-children {' +
+                '    display: none;' +
+                '}' +
+                '.actions {' +
+                '    margin-left: auto;' +
+                '    display: none;' +
+                '}' +
+                '.directory:hover .actions,' +
+                '.snippet:hover .actions {' +
+                '    display: flex;' +
+                '    position: absolute;' +
+                '    right: 5px;' +
+                '    background-color: var(--vscode-editor-background);' +
+                '    opacity: 0.9;' +
+                '    box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);' +
+                '    border-radius: 3px;' +
+                '    padding: 0 4px;' +
+                '    z-index: 10;' +
+                '}' +
+                '.action-button {' +
+                '    border-radius: 3px;' +
+                '    padding: 2px;' +
+                '    margin-left: 4px;' +
+                '    cursor: pointer;' +
+                '    border: none;' +
+                '    background: none;' +
+                '    color: var(--vscode-foreground);' +
+                '    transition: 0.4s;' +
+                '}' +
+                '.action-button:hover {' +
+                '    color: var(--vscode-button-foreground);' +
+                '    background-color: var(--vscode-button-background);' +
+                '}' +
+                '.snippet {' +
+                '    height: 24px;' +
+                '    padding: 5px;' +
+                '    cursor: pointer;' +
+                '    display: flex;' +
+                '    align-items: center;' +
+                '    border-radius: 3px;' +
+                '    margin: 2px 0;' +
+                '    position: relative;' +
+                '}' +
+                '.snippet:hover {' +
+                '    background-color: var(--vscode-list-hoverBackground);' +
+                '}' +
+                '.snippet-icon {' +
+                '    margin-right: 5px;' +
+                '    color: var(--vscode-symbolIcon-variableForeground);' +
+                '}' +
+                '.directory-name, .snippet-name {' +
+                '    overflow: hidden;' +
+                '    text-overflow: ellipsis;' +
+                '    white-space: nowrap;' +
+                '    flex: 1;' +
+                '}';
+
+            // 只添加一次样式
+            (function addStyles() {
+                const style = document.createElement('style');
+                style.textContent = directoryStyles;
+                document.head.appendChild(style);
+            })();
 
             function createDirectoryElement(directory) {
                 const div = document.createElement('div');
                 div.className = 'directory';
                 div.innerHTML = \`
                     <span class="directory-icon">◢</span>
-                    <span>📁 \${directory.name}</span>
+                    <span class="directory-name">📁 \${directory.name}</span>
                     <div class="actions">
                         <button class="action-button" onclick="createSnippetInDirectory('\${directory.id}')" title="新建代码片段">➕</button>
                         <button class="action-button" onclick="renameDirectory('\${directory.id}')" title="重命名目录">📝</button>
@@ -312,7 +526,7 @@ export class SnippetWebviewProvider {
                 div.className = 'snippet';
                 div.innerHTML = \`
                     <span class="snippet-icon">📄</span>
-                    <span>\${snippet.name}</span>
+                    <span class="snippet-name">\${snippet.name}</span>
                     <div class="actions">
                         <button class="action-button" onclick="insertSnippet('\${snippet.id}')" title="插入代码">📋</button>
                         <button class="action-button" onclick="previewSnippet('\${snippet.id}')" title="预览代码">👁️</button>
@@ -407,6 +621,7 @@ export class SnippetWebviewProvider {
             }
 
             function refreshContent() {
+                showLoadingIndicator();
                 vscode.postMessage({ type: 'getSnippets' });
             }
         </script>

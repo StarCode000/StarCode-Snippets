@@ -42,7 +42,43 @@ const extensionConfig = {
     new CopyWebpackPlugin({
       patterns: [
         {
-          from: 'node_modules/monaco-editor/min',
+          from: 'node_modules/monaco-editor/min/vs/loader.js',
+          to: 'monaco-editor/vs'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/editor/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/base/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/basic-languages/javascript/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/basic-languages/typescript/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/basic-languages/html/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/basic-languages/css/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/basic-languages/json/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/language/typescript/**/*.js',
+          to: 'monaco-editor'
+        },
+        {
+          from: 'node_modules/monaco-editor/min/vs/language/json/**/*.js',
           to: 'monaco-editor'
         },
         {
@@ -52,6 +88,9 @@ const extensionConfig = {
       ]
     })
   ],
+  optimization: {
+    minimize: true
+  },
   devtool: 'nosources-source-map',
   infrastructureLogging: {
     level: "log",

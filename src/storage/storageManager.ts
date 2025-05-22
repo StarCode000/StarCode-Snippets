@@ -10,6 +10,14 @@ export class StorageManager {
   private writeQueue: Array<() => Promise<void>> = []
   private readonly maxRetries = 3
   private readonly retryDelay = 1000 // 1秒
+  
+  // 添加缓存
+  private snippetsCache: CodeSnippet[] | null = null
+  private directoriesCache: Directory[] | null = null
+  private lastSnippetsRead: number = 0
+  private lastDirectoriesRead: number = 0
+  private readonly cacheLifetime = 10000 // 缓存有效期10秒，增加缓存时间减少IO
+  private fileReadPromises: Map<string, Promise<any>> = new Map() // 读取承诺缓存
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context
@@ -37,10 +45,28 @@ export class StorageManager {
       } catch {
         await vscode.workspace.fs.writeFile(this.directoriesFile, Buffer.from(JSON.stringify([], null, 2)))
       }
+      
+      // 预加载缓存 - 非阻塞方式
+      this.preloadCache()
     } catch (error) {
       vscode.window.showErrorMessage(`初始化存储失败: ${error}`)
       throw error
     }
+  }
+  
+  // 预加载缓存方法
+  private preloadCache() {
+    // 使用非阻塞方式预加载
+    setTimeout(async () => {
+      try {
+        await Promise.all([
+          this.getAllSnippets(),
+          this.getAllDirectories()
+        ])
+      } catch (error) {
+        console.error('预加载缓存失败:', error)
+      }
+    }, 0)
   }
 
   // 文件写入锁定机制
@@ -66,6 +92,28 @@ export class StorageManager {
   // 延迟函数
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  // 共享读取承诺，防止并发读取同一文件
+  private getFileReadPromise(file: vscode.Uri, retries = this.maxRetries): Promise<any> {
+    const fileKey = file.toString()
+    
+    // 如果已存在读取承诺并且未完成，直接返回
+    const existingPromise = this.fileReadPromises.get(fileKey)
+    if (existingPromise) {
+      return existingPromise
+    }
+
+    // 创建新的读取承诺
+    const promise = this.readFileWithRetry(file, retries)
+      .finally(() => {
+        // 完成后从缓存中移除
+        this.fileReadPromises.delete(fileKey)
+      })
+    
+    // 缓存承诺
+    this.fileReadPromises.set(fileKey, promise)
+    return promise
   }
 
   // 带重试的文件读取
@@ -100,6 +148,15 @@ export class StorageManager {
 
       // 原子重命名
       await vscode.workspace.fs.rename(tempFile, file, { overwrite: true })
+      
+      // 更新缓存
+      if (file.path.includes('snippets.json')) {
+        this.snippetsCache = data
+        this.lastSnippetsRead = Date.now()
+      } else if (file.path.includes('directories.json')) {
+        this.directoriesCache = data
+        this.lastDirectoriesRead = Date.now()
+      }
     } catch (error) {
       if (retries > 0) {
         await this.delay(this.retryDelay)
@@ -120,12 +177,61 @@ export class StorageManager {
   // 获取所有代码片段
   public async getAllSnippets(): Promise<CodeSnippet[]> {
     try {
-      return (await this.readFileWithRetry(this.snippetsFile)) || []
+      // 首先检查缓存是否有效
+      const now = Date.now()
+      if (this.snippetsCache && (now - this.lastSnippetsRead < this.cacheLifetime)) {
+        return this.snippetsCache
+      }
+      
+      // 如果缓存无效，则从文件读取，使用共享读取承诺
+      const snippets = await this.getFileReadPromise(this.snippetsFile) || []
+      
+      // 更新缓存
+      this.snippetsCache = snippets
+      this.lastSnippetsRead = now
+      
+      return snippets
     } catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
         return []
       }
+      // 如果读取失败但有缓存，使用缓存
+      if (this.snippetsCache) {
+        console.warn('读取文件失败，使用缓存数据', error)
+        return this.snippetsCache
+      }
       vscode.window.showErrorMessage(`读取代码片段失败: ${error}`)
+      throw error
+    }
+  }
+
+  // 获取所有目录
+  public async getAllDirectories(): Promise<Directory[]> {
+    try {
+      // 首先检查缓存是否有效
+      const now = Date.now()
+      if (this.directoriesCache && (now - this.lastDirectoriesRead < this.cacheLifetime)) {
+        return this.directoriesCache
+      }
+      
+      // 如果缓存无效，则从文件读取，使用共享读取承诺
+      const directories = await this.getFileReadPromise(this.directoriesFile) || []
+      
+      // 更新缓存
+      this.directoriesCache = directories
+      this.lastDirectoriesRead = now
+      
+      return directories
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+        return []
+      }
+      // 如果读取失败但有缓存，使用缓存
+      if (this.directoriesCache) {
+        console.warn('读取文件失败，使用缓存数据', error)
+        return this.directoriesCache
+      }
+      vscode.window.showErrorMessage(`读取目录失败: ${error}`)
       throw error
     }
   }
@@ -172,19 +278,6 @@ export class StorageManager {
       await this.writeFileWithRetry(this.snippetsFile, filteredSnippets)
     } catch (error) {
       vscode.window.showErrorMessage(`删除代码片段失败: ${error}`)
-      throw error
-    }
-  }
-
-  // 获取所有目录
-  public async getAllDirectories(): Promise<Directory[]> {
-    try {
-      return (await this.readFileWithRetry(this.directoriesFile)) || []
-    } catch (error) {
-      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-        return []
-      }
-      vscode.window.showErrorMessage(`读取目录失败: ${error}`)
       throw error
     }
   }
@@ -249,5 +342,21 @@ export class StorageManager {
       vscode.window.showErrorMessage(`更新顺序失败: ${error}`)
       throw error
     }
+  }
+
+  // 更新目录顺序
+  public async updateDirectoriesOrder(directories: Directory[]): Promise<void> {
+    try {
+      await this.writeFileWithRetry(this.directoriesFile, directories)
+    } catch (error) {
+      vscode.window.showErrorMessage(`更新目录顺序失败: ${error}`)
+      throw error
+    }
+  }
+
+  // 清除缓存方法
+  public clearCache(): void {
+    this.snippetsCache = null
+    this.directoriesCache = null
   }
 }
