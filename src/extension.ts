@@ -7,54 +7,74 @@ import { SnippetsTreeDataProvider } from './explorer/treeProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.time('starcode-snippets:activate');
+  console.log('StarCode Snippets 扩展开始激活...');
   
-  // 创建存储管理器
-  const storageManager = new StorageManager(context);
-  
-  // 创建树视图数据提供程序
-  const treeDataProvider = new SnippetsTreeDataProvider(storageManager);
-  
-  // 注册树视图
-  const treeView = vscode.window.createTreeView('copyCodeExplorer', {
-    treeDataProvider: treeDataProvider,
-    showCollapseAll: true
-  });
-  
-  // 将树视图添加到上下文订阅中
-  context.subscriptions.push(treeView);
-  
-  // 注册虚拟文档内容提供者，用于预览代码片段
-  TextDocumentContentProvider.register(context);
-
-  // 延迟初始化编辑器和注册命令，减少插件激活时的负担
-  setTimeout(() => {
-    // 初始化代码片段编辑器，传入存储管理器
-    const snippetEditor = SnippetEditor.initialize(context, storageManager);
+  try {
+    // 创建存储管理器
+    console.log('创建存储管理器...');
+    const storageManager = new StorageManager(context);
     
-    // 监听SnippetEditor的保存事件，以便刷新视图
-    snippetEditor.onDidSaveSnippet(() => {
-      treeDataProvider.refresh();
+    // 创建树视图数据提供程序
+    console.log('创建树视图数据提供程序...');
+    const treeDataProvider = new SnippetsTreeDataProvider(storageManager);
+    
+    // 注册树视图
+    console.log('注册树视图 copyCodeExplorer...');
+    const treeView = vscode.window.createTreeView('copyCodeExplorer', {
+      treeDataProvider: treeDataProvider,
+      showCollapseAll: true
     });
     
-    // 注册完成编辑命令
-    const finishEditing = vscode.commands.registerCommand('starcode-snippets.finishEditing', async () => {
-      // 保存当前文档
-      if (vscode.window.activeTextEditor) {
-        await vscode.window.activeTextEditor.document.save();
+    console.log('树视图注册成功，ID:', treeView.title);
+    
+    // 将树视图添加到上下文订阅中
+    context.subscriptions.push(treeView);
+    
+    // 延迟初始化编辑器和注册命令，减少插件激活时的负担
+    setTimeout(() => {
+      console.log('开始延迟初始化...');
+      
+      try {
+        // 初始化代码片段编辑器，传入存储管理器
+        console.log('初始化代码片段编辑器...');
+        const snippetEditor = SnippetEditor.initialize(context, storageManager);
+        
+        // 监听SnippetEditor的保存事件，以便刷新视图
+        snippetEditor.onDidSaveSnippet(() => {
+          treeDataProvider.refresh();
+        });
+        
+        // 注册完成编辑命令
+        console.log('注册完成编辑命令...');
+        const finishEditing = vscode.commands.registerCommand('starcode-snippets.finishEditing', async () => {
+          // 保存当前文档
+          if (vscode.window.activeTextEditor) {
+            await vscode.window.activeTextEditor.document.save();
+          }
+          // 关闭编辑器
+          await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        });
+        context.subscriptions.push(finishEditing);
+        
+        // 注册所有命令
+        console.log('注册所有命令...');
+        const commands = registerCommands(context, storageManager, treeDataProvider);
+        
+        // 添加命令到订阅中
+        context.subscriptions.push(...commands);
+        
+        console.log('StarCode Snippets 扩展激活完成');
+        console.timeEnd('starcode-snippets:activate');
+      } catch (error) {
+        console.error('延迟初始化过程中发生错误:', error);
+        vscode.window.showErrorMessage(`StarCode Snippets 初始化失败: ${error}`);
       }
-      // 关闭编辑器
-      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-    });
-    context.subscriptions.push(finishEditing);
+    }, 100); // 缩短延迟时间到100ms
     
-    // 注册所有命令
-    const commands = registerCommands(context, storageManager, treeDataProvider);
-    
-    // 添加命令到订阅中
-    context.subscriptions.push(...commands);
-    
-    console.timeEnd('starcode-snippets:activate');
-  }, 500); // 缩短延迟时间
+  } catch (error) {
+    console.error('StarCode Snippets 扩展激活失败:', error);
+    vscode.window.showErrorMessage(`StarCode Snippets 激活失败: ${error}`);
+  }
 }
 
 // 将命令注册逻辑分离出来，便于延迟加载
