@@ -16,7 +16,7 @@ export class StorageManager {
   private directoriesCache: Directory[] | null = null
   private lastSnippetsRead: number = 0
   private lastDirectoriesRead: number = 0
-  private readonly cacheLifetime = 10000 // 缓存有效期10秒，增加缓存时间减少IO
+  private readonly cacheLifetime = 10000 // 缓存有效期10秒
   private fileReadPromises: Map<string, Promise<any>> = new Map() // 读取承诺缓存
 
   constructor(context: vscode.ExtensionContext) {
@@ -46,7 +46,7 @@ export class StorageManager {
         await vscode.workspace.fs.writeFile(this.directoriesFile, Buffer.from(JSON.stringify([], null, 2)))
       }
       
-      // 预加载缓存 - 非阻塞方式
+      // 预加载缓存
       this.preloadCache()
     } catch (error) {
       vscode.window.showErrorMessage(`初始化存储失败: ${error}`)
@@ -56,7 +56,6 @@ export class StorageManager {
   
   // 预加载缓存方法
   private preloadCache() {
-    // 使用非阻塞方式预加载
     setTimeout(async () => {
       try {
         await Promise.all([
@@ -98,20 +97,16 @@ export class StorageManager {
   private getFileReadPromise(file: vscode.Uri, retries = this.maxRetries): Promise<any> {
     const fileKey = file.toString()
     
-    // 如果已存在读取承诺并且未完成，直接返回
     const existingPromise = this.fileReadPromises.get(fileKey)
     if (existingPromise) {
       return existingPromise
     }
 
-    // 创建新的读取承诺
     const promise = this.readFileWithRetry(file, retries)
       .finally(() => {
-        // 完成后从缓存中移除
         this.fileReadPromises.delete(fileKey)
       })
     
-    // 缓存承诺
     this.fileReadPromises.set(fileKey, promise)
     return promise
   }
@@ -137,16 +132,13 @@ export class StorageManager {
     try {
       await this.acquireLock()
 
-      // 写入临时文件
       await vscode.workspace.fs.writeFile(tempFile, Buffer.from(JSON.stringify(data, null, 2)))
 
-      // 验证临时文件
       const tempContent = await this.readFileWithRetry(tempFile)
       if (JSON.stringify(tempContent) !== JSON.stringify(data)) {
         throw new Error('文件验证失败')
       }
 
-      // 原子重命名
       await vscode.workspace.fs.rename(tempFile, file, { overwrite: true })
       
       // 更新缓存
@@ -165,7 +157,6 @@ export class StorageManager {
       throw error
     } finally {
       try {
-        // 清理临时文件（如果还存在）
         await vscode.workspace.fs.delete(tempFile)
       } catch {
         // 忽略清理错误
@@ -177,62 +168,40 @@ export class StorageManager {
   // 获取所有代码片段
   public async getAllSnippets(): Promise<CodeSnippet[]> {
     try {
-      // 首先检查缓存是否有效
       const now = Date.now()
       if (this.snippetsCache && (now - this.lastSnippetsRead < this.cacheLifetime)) {
         return this.snippetsCache
       }
       
-      // 如果缓存无效，则从文件读取，使用共享读取承诺
-      const snippets = await this.getFileReadPromise(this.snippetsFile) || []
+      const snippets = await this.getFileReadPromise(this.snippetsFile)
       
-      // 更新缓存
       this.snippetsCache = snippets
       this.lastSnippetsRead = now
       
       return snippets
     } catch (error) {
-      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-        return []
-      }
-      // 如果读取失败但有缓存，使用缓存
-      if (this.snippetsCache) {
-        console.warn('读取文件失败，使用缓存数据', error)
-        return this.snippetsCache
-      }
-      vscode.window.showErrorMessage(`读取代码片段失败: ${error}`)
-      throw error
+      console.error('读取代码片段失败:', error)
+      return []
     }
   }
 
   // 获取所有目录
   public async getAllDirectories(): Promise<Directory[]> {
     try {
-      // 首先检查缓存是否有效
       const now = Date.now()
       if (this.directoriesCache && (now - this.lastDirectoriesRead < this.cacheLifetime)) {
         return this.directoriesCache
       }
       
-      // 如果缓存无效，则从文件读取，使用共享读取承诺
-      const directories = await this.getFileReadPromise(this.directoriesFile) || []
+      const directories = await this.getFileReadPromise(this.directoriesFile)
       
-      // 更新缓存
       this.directoriesCache = directories
       this.lastDirectoriesRead = now
       
       return directories
     } catch (error) {
-      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-        return []
-      }
-      // 如果读取失败但有缓存，使用缓存
-      if (this.directoriesCache) {
-        console.warn('读取文件失败，使用缓存数据', error)
-        return this.directoriesCache
-      }
-      vscode.window.showErrorMessage(`读取目录失败: ${error}`)
-      throw error
+      console.error('读取目录失败:', error)
+      return []
     }
   }
 
@@ -240,13 +209,11 @@ export class StorageManager {
   public async saveSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      if (snippets.some((s) => s.id === snippet.id)) {
-        throw new Error('代码片段ID已存在')
-      }
       snippets.push(snippet)
       await this.writeFileWithRetry(this.snippetsFile, snippets)
+      console.log(`代码片段已保存: ${snippet.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`保存代码片段失败: ${error}`)
+      console.error('保存代码片段失败:', error)
       throw error
     }
   }
@@ -255,14 +222,24 @@ export class StorageManager {
   public async updateSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const index = snippets.findIndex((s) => s.id === snippet.id)
+      const index = snippets.findIndex(s => s.id === snippet.id)
+      
       if (index === -1) {
-        throw new Error('代码片段不存在')
+        throw new Error(`代码片段不存在: ${snippet.id}`)
       }
+
+      const existing = snippets[index]
+      
+      if (!this.hasSnippetChanged(existing, snippet)) {
+        console.log(`代码片段无变化，跳过更新: ${snippet.name}`)
+        return
+      }
+
       snippets[index] = snippet
       await this.writeFileWithRetry(this.snippetsFile, snippets)
+      console.log(`代码片段已更新: ${snippet.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`更新代码片段失败: ${error}`)
+      console.error('更新代码片段失败:', error)
       throw error
     }
   }
@@ -271,13 +248,18 @@ export class StorageManager {
   public async deleteSnippet(id: string): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const filteredSnippets = snippets.filter((s) => s.id !== id)
-      if (filteredSnippets.length === snippets.length) {
-        throw new Error('代码片段不存在')
+      const index = snippets.findIndex(s => s.id === id)
+      
+      if (index === -1) {
+        throw new Error(`代码片段不存在: ${id}`)
       }
-      await this.writeFileWithRetry(this.snippetsFile, filteredSnippets)
+
+      const deletedSnippet = snippets[index]
+      snippets.splice(index, 1)
+      await this.writeFileWithRetry(this.snippetsFile, snippets)
+      console.log(`代码片段已删除: ${deletedSnippet.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`删除代码片段失败: ${error}`)
+      console.error('删除代码片段失败:', error)
       throw error
     }
   }
@@ -286,13 +268,11 @@ export class StorageManager {
   public async createDirectory(directory: Directory): Promise<void> {
     try {
       const directories = await this.getAllDirectories()
-      if (directories.some((d) => d.id === directory.id)) {
-        throw new Error('目录ID已存在')
-      }
       directories.push(directory)
       await this.writeFileWithRetry(this.directoriesFile, directories)
+      console.log(`目录已创建: ${directory.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`创建目录失败: ${error}`)
+      console.error('创建目录失败:', error)
       throw error
     }
   }
@@ -301,14 +281,24 @@ export class StorageManager {
   public async updateDirectory(directory: Directory): Promise<void> {
     try {
       const directories = await this.getAllDirectories()
-      const index = directories.findIndex((d) => d.id === directory.id)
+      const index = directories.findIndex(d => d.id === directory.id)
+      
       if (index === -1) {
-        throw new Error('目录不存在')
+        throw new Error(`目录不存在: ${directory.id}`)
       }
+
+      const existing = directories[index]
+      
+      if (!this.hasDirectoryChanged(existing, directory)) {
+        console.log(`目录无变化，跳过更新: ${directory.name}`)
+        return
+      }
+
       directories[index] = directory
       await this.writeFileWithRetry(this.directoriesFile, directories)
+      console.log(`目录已更新: ${directory.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`更新目录失败: ${error}`)
+      console.error('更新目录失败:', error)
       throw error
     }
   }
@@ -316,47 +306,105 @@ export class StorageManager {
   // 删除目录
   public async deleteDirectory(id: string): Promise<void> {
     try {
-      // 删除目录
-      const directories = await this.getAllDirectories()
-      const filteredDirectories = directories.filter((d) => d.id !== id)
-      if (filteredDirectories.length === directories.length) {
-        throw new Error('目录不存在')
+      const [directories, snippets] = await Promise.all([
+        this.getAllDirectories(),
+        this.getAllSnippets()
+      ])
+      
+      const directoryIndex = directories.findIndex(d => d.id === id)
+      if (directoryIndex === -1) {
+        throw new Error(`目录不存在: ${id}`)
       }
-      await this.writeFileWithRetry(this.directoriesFile, filteredDirectories)
 
-      // 删除该目录下的所有代码片段
-      const snippets = await this.getAllSnippets()
-      const filteredSnippets = snippets.filter((s) => s.parentId !== id)
-      await this.writeFileWithRetry(this.snippetsFile, filteredSnippets)
+      const deletedDirectory = directories[directoryIndex]
+
+      // 递归删除子目录和代码片段
+      const toDelete = this.findAllChildItems(id, directories, snippets)
+      
+      // 删除所有子项目
+      for (const item of toDelete.snippets) {
+        const snippetIndex = snippets.findIndex(s => s.id === item.id)
+        if (snippetIndex >= 0) {
+          snippets.splice(snippetIndex, 1)
+        }
+      }
+      
+      for (const item of toDelete.directories) {
+        const dirIndex = directories.findIndex(d => d.id === item.id)
+        if (dirIndex >= 0) {
+          directories.splice(dirIndex, 1)
+        }
+      }
+      
+      // 删除目录本身
+      directories.splice(directoryIndex, 1)
+      
+      // 保存更改
+      await Promise.all([
+        this.writeFileWithRetry(this.directoriesFile, directories),
+        this.writeFileWithRetry(this.snippetsFile, snippets)
+      ])
+      
+      console.log(`目录及其内容已删除: ${deletedDirectory.name}`)
     } catch (error) {
-      vscode.window.showErrorMessage(`删除目录失败: ${error}`)
+      console.error('删除目录失败:', error)
       throw error
+    }
+  }
+
+  // 递归查找所有子项目
+  private findAllChildItems(parentId: string, directories: Directory[], snippets: CodeSnippet[]): {
+    directories: Directory[]
+    snippets: CodeSnippet[]
+  } {
+    const childDirectories = directories.filter(d => d.parentId === parentId)
+    const childSnippets = snippets.filter(s => s.parentId === parentId)
+    
+    let allChildDirectories = [...childDirectories]
+    let allChildSnippets = [...childSnippets]
+    
+    for (const childDir of childDirectories) {
+      const grandChildren = this.findAllChildItems(childDir.id, directories, snippets)
+      allChildDirectories.push(...grandChildren.directories)
+      allChildSnippets.push(...grandChildren.snippets)
+    }
+    
+    return {
+      directories: allChildDirectories,
+      snippets: allChildSnippets
     }
   }
 
   // 更新代码片段顺序
   public async updateSnippetsOrder(snippets: CodeSnippet[]): Promise<void> {
-    try {
-      await this.writeFileWithRetry(this.snippetsFile, snippets)
-    } catch (error) {
-      vscode.window.showErrorMessage(`更新顺序失败: ${error}`)
-      throw error
-    }
+    await this.writeFileWithRetry(this.snippetsFile, snippets)
   }
 
   // 更新目录顺序
   public async updateDirectoriesOrder(directories: Directory[]): Promise<void> {
-    try {
-      await this.writeFileWithRetry(this.directoriesFile, directories)
-    } catch (error) {
-      vscode.window.showErrorMessage(`更新目录顺序失败: ${error}`)
-      throw error
-    }
+    await this.writeFileWithRetry(this.directoriesFile, directories)
   }
 
-  // 清除缓存方法
+  // 清除缓存
   public clearCache(): void {
     this.snippetsCache = null
     this.directoriesCache = null
+    this.lastSnippetsRead = 0
+    this.lastDirectoriesRead = 0
   }
-}
+
+  // 检查代码片段是否有变化
+  private hasSnippetChanged(existing: CodeSnippet, updated: CodeSnippet): boolean {
+    return existing.name !== updated.name ||
+           existing.code !== updated.code ||
+           existing.language !== updated.language ||
+           existing.parentId !== updated.parentId
+  }
+
+  // 检查目录是否有变化
+  private hasDirectoryChanged(existing: Directory, updated: Directory): boolean {
+    return existing.name !== updated.name ||
+           existing.parentId !== updated.parentId ||
+           existing.order !== updated.order
+  }
+} 

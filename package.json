@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -136,6 +136,12 @@
         "command": "starcode-snippets.toggleSearchMode",
         "title": "切换搜索模式",
         "category": "StarCode Snippets",
+        "icon": "$(issue-reopened)"
+      },
+      {
+        "command": "starcode-snippets.openSettings",
+        "title": "云端同步设置",
+        "category": "StarCode Snippets",
         "icon": "$(settings-gear)"
       }
     ],
@@ -170,23 +176,24 @@
           "when": "view == copyCodeExplorer",
           "group": "navigation@3"
         },
+
         {
-          "command": "starcode-snippets.refreshExplorer",
+          "command": "starcode-snippets.createDirectory",
           "when": "view == copyCodeExplorer",
           "group": "navigation@4"
         },
         {
-          "command": "starcode-snippets.createDirectory",
+          "command": "starcode-snippets.importSnippets",
           "when": "view == copyCodeExplorer",
           "group": "navigation@5"
         },
         {
-          "command": "starcode-snippets.importSnippets",
+          "command": "starcode-snippets.exportAll",
           "when": "view == copyCodeExplorer",
           "group": "navigation@6"
         },
         {
-          "command": "starcode-snippets.exportAll",
+          "command": "starcode-snippets.openSettings",
           "when": "view == copyCodeExplorer",
           "group": "navigation@7"
         }
@@ -280,6 +287,118 @@
       },
       "virtualWorkspaces": true,
       "treeItemButtons": true
+    },
+    "configuration": {
+      "title": "StarCode Snippets",
+      "properties": {
+        "starcode-snippets.cloudSync": {
+          "type": "object",
+          "default": {
+            "endpoint": "",
+            "accessKey": "",
+            "secretKey": "",
+            "bucket": "",
+            "region": "",
+            "timeout": 30,
+            "addressing": "virtual-hosted-style",
+            "autoSync": false,
+            "syncInterval": 60,
+            "concurrency": 3
+          },
+          "description": "云端同步配置",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "S3兼容存储服务的端点地址"
+            },
+            "accessKey": {
+              "type": "string",
+              "description": "访问密钥"
+            },
+            "secretKey": {
+              "type": "string",
+              "description": "密钥"
+            },
+            "bucket": {
+              "type": "string",
+              "description": "存储桶名称"
+            },
+            "region": {
+              "type": "string",
+              "description": "区域标识符"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "连接超时时间（秒）",
+              "minimum": 1,
+              "maximum": 300,
+              "default": 30
+            },
+            "addressing": {
+              "type": "string",
+              "enum": [
+                "virtual-hosted-style",
+                "path-style"
+              ],
+              "description": "URL寻址方式",
+              "default": "virtual-hosted-style"
+            },
+            "autoSync": {
+              "type": "boolean",
+              "description": "是否启用自动同步",
+              "default": false
+            },
+            "syncInterval": {
+              "type": "number",
+              "description": "自动同步间隔（秒）",
+              "minimum": 10,
+              "maximum": 3600,
+              "default": 60
+            },
+            "concurrency": {
+              "type": "number",
+              "description": "请求并发数",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
+          }
+        },
+        "starcode-snippets.cloudSyncStatus": {
+          "type": "object",
+          "default": {
+            "isConnected": false,
+            "lastSyncTime": null,
+            "lastError": null,
+            "isSyncing": false
+          },
+          "description": "云端同步状态",
+          "properties": {
+            "isConnected": {
+              "type": "boolean",
+              "description": "是否已连接"
+            },
+            "lastSyncTime": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "上次同步时间"
+            },
+            "lastError": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "最后一次错误信息"
+            },
+            "isSyncing": {
+              "type": "boolean",
+              "description": "是否正在同步"
+            }
+          }
+        }
+      }
     }
   },
   "scripts": {
@@ -311,6 +430,9 @@
     "webpack-cli": "5.0.1"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.817.0",
+    "diff": "^5.1.0",
+    "diff3": "^0.0.3",
     "monaco-editor": "^0.52.2",
     "uuid": "^11.1.0"
   }

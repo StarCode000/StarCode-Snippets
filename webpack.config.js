@@ -20,10 +20,20 @@ const extensionConfig = {
     libraryTarget: 'commonjs2'
   },
   externals: {
-    vscode: 'commonjs vscode'
+    vscode: 'commonjs vscode',
+    // AWS SDK externals for Node.js environment
+    '@aws-sdk/client-s3': 'commonjs @aws-sdk/client-s3'
   },
   resolve: {
-    extensions: ['.ts', '.js']
+    extensions: ['.ts', '.js'],
+    fallback: {
+      // AWS SDK v3 fallbacks for Node.js
+      "crypto": false,
+      "stream": false,
+      "util": false,
+      "buffer": false,
+      "events": false
+    }
   },
   module: {
     rules: [

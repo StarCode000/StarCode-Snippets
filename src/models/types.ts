@@ -18,3 +18,25 @@ export interface Directory {
   parentId: string | null
   order: number
 }
+
+// 云端同步配置接口
+export interface CloudSyncConfig {
+  endpoint: string
+  accessKey: string
+  secretKey: string
+  bucket: string
+  region: string
+  timeout: number // 连接超时时间（秒）
+  addressing: 'path-style' | 'virtual-hosted-style'
+  autoSync: boolean
+  syncInterval: number // 自动同步间隔（秒）
+  concurrency: number // 请求并发数
+}
+
+// 云端同步状态
+export interface CloudSyncStatus {
+  isConnected: boolean
+  lastSyncTime: number | null
+  lastError: string | null
+  isSyncing: boolean
+}
