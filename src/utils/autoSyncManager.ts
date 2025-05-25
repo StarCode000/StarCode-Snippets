@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CloudSyncManager } from './cloudSyncManager';
 import { StorageManager } from '../storage/storageManager';
 import { SettingsManager } from './settingsManager';
+import { ContextManager } from './contextManager';
 
 export class AutoSyncManager {
   private syncTimer: any = null;
@@ -14,7 +15,7 @@ export class AutoSyncManager {
   constructor(context: vscode.ExtensionContext, storageManager: StorageManager) {
     this.context = context;
     this.storageManager = storageManager;
-    this.cloudSyncManager = new CloudSyncManager(context);
+    this.cloudSyncManager = new CloudSyncManager(context, storageManager);
   }
 
   /**
@@ -138,8 +139,7 @@ export class AutoSyncManager {
     console.log('执行自动同步...');
     
     // 检查是否正在编辑代码片段
-    const isEditing = await vscode.commands.executeCommand('getContext', 'starcode-snippets.isEditingSnippet') as boolean;
-    if (isEditing) {
+    if (ContextManager.isEditingSnippet()) {
       console.log('用户正在编辑代码片段，跳过此次自动同步');
       return; // 跳过此次同步，但不停止定时器
     }
@@ -249,8 +249,7 @@ export class AutoSyncManager {
     console.log('立即执行同步...');
     
     // 检查是否正在编辑代码片段
-    const isEditing = await vscode.commands.executeCommand('getContext', 'starcode-snippets.isEditingSnippet') as boolean;
-    if (isEditing) {
+    if (ContextManager.isEditingSnippet()) {
       console.log('用户正在编辑代码片段，无法执行同步');
       return {
         success: false,

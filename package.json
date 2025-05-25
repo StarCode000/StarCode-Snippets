@@ -16,7 +16,9 @@
   "categories": [
     "Snippets"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -31,11 +33,19 @@
     "views": {
       "starcode-snippets-container": [
         {
-          "id": "copyCodeExplorer",
-          "name": "代码库"
+          "id": "starCodeSnippetsExplorer",
+          "name": "代码库",
+          "when": "true"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "starCodeSnippetsExplorer",
+        "contents": "欢迎使用 StarCode Snippets！\n[创建第一个目录](command:starcode-snippets.createDirectory)\n[保存代码片段](command:starcode-snippets.saveToLibrary)",
+        "when": "true"
+      }
+    ],
     "commands": [
       {
         "command": "starcode-snippets.saveToLibrary",
@@ -179,8 +189,14 @@
         "title": "查看自动同步状态",
         "category": "StarCode Snippets",
         "icon": "$(info)"
+      },
+      {
+        "command": "starcode-snippets.showSyncStatus",
+                "title": "查看同步状态详情",
+        "category": "StarCode Snippets",
+        "icon": "$(pulse)"
       }
-    ],
+      ],
     "menus": {
       "editor/context": [
         {
@@ -199,130 +215,130 @@
       "view/title": [
         {
           "command": "starcode-snippets.searchSnippets",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@1"
         },
         {
           "command": "starcode-snippets.clearSearch",
-          "when": "view == copyCodeExplorer && starcode-snippets.hasActiveSearch",
+          "when": "view == starCodeSnippetsExplorer && starcode-snippets.hasActiveSearch",
           "group": "navigation@2"
         },
         {
           "command": "starcode-snippets.toggleSearchMode",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@3"
         },
         {
           "command": "starcode-snippets.createDirectory",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@4"
         },
         {
           "command": "starcode-snippets.importSnippets",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@5"
         },
         {
           "command": "starcode-snippets.exportAll",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
-        },
-        {
-          "command": "starcode-snippets.viewHistory",
-          "when": "view == copyCodeExplorer",
-          "group": "navigation@7"
         }
       ],
       "view/item/context": [
         {
           "command": "starcode-snippets.createSnippetInDirectory",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@1"
         },
         {
           "command": "starcode-snippets.rename",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@2"
         },
         {
           "command": "starcode-snippets.delete",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@3"
         },
         {
           "command": "starcode-snippets.createSnippetInDirectory",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "1_creation@1"
         },
         {
           "command": "starcode-snippets.previewSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@1"
         },
         {
           "command": "starcode-snippets.editSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@2"
         },
         {
           "command": "starcode-snippets.appendCode",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@3"
         },
         {
           "command": "starcode-snippets.moveToDirectory",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@4"
         },
         {
           "command": "starcode-snippets.rename",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@5"
         },
         {
           "command": "starcode-snippets.exportSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@6"
         },
         {
           "command": "starcode-snippets.delete",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@7"
         },
         {
           "command": "starcode-snippets.appendCode",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@1"
         },
         {
           "command": "starcode-snippets.editSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@2"
         },
         {
           "command": "starcode-snippets.previewSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@3"
         },
         {
           "command": "starcode-snippets.moveToDirectory",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "4_organization@1"
         },
         {
           "command": "starcode-snippets.exportSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "5_export@1"
         },
         {
           "command": "starcode-snippets.manualSync",
-          "when": "view == copyCodeExplorer && viewItem == syncStatus",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
           "group": "inline@1"
         },
         {
           "command": "starcode-snippets.openSettings",
-          "when": "view == copyCodeExplorer && viewItem == syncStatus",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
           "group": "inline@2"
+        },
+        {
+          "command": "starcode-snippets.viewHistory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
+          "group": "inline@3"
         }
       ]
     },
@@ -450,7 +466,9 @@
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "package": "webpack --mode production --devtool source-map",
+    "build": "node build-extension.js",
+    "build:quick": "npm run package && vsce package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
@@ -458,6 +476,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
+    "@types/diff": "^5.2.3",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/vscode": "^1.15.0",
@@ -470,6 +489,7 @@
     "eslint": "^9.19.0",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
     "webpack": "5.75.0",
     "webpack-cli": "5.0.1"
@@ -477,8 +497,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.817.0",
     "diff": "^5.1.0",
-    "diff3": "^0.0.3",
     "monaco-editor": "^0.52.2",
+    "node-diff3": "^3.1.2",
     "uuid": "^11.1.0"
   }
 }

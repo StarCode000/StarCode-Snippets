@@ -3,6 +3,7 @@ import { CloudSyncConfig, CloudSyncStatus } from '../models/types';
 import { SettingsManager } from '../utils/settingsManager';
 import { CloudSyncManager } from '../utils/cloudSyncManager';
 import { StorageManager } from '../storage/storageManager';
+import { ContextManager } from '../utils/contextManager';
 
 export class SettingsWebviewProvider {
   public static readonly viewType = 'starcode-snippets.settings';
@@ -70,6 +71,9 @@ export class SettingsWebviewProvider {
           break;
         case 'importSettings':
           await this._importSettings(panel);
+          break;
+        case 'forceResetCloudSync':
+          await this._forceResetCloudSync(panel);
           break;
       }
     });
@@ -252,8 +256,7 @@ export class SettingsWebviewProvider {
   private async _performManualSync(panel: vscode.WebviewPanel) {
     try {
       // 检查是否正在编辑代码片段
-      const isEditing = await vscode.commands.executeCommand('getContext', 'starcode-snippets.isEditingSnippet') as boolean;
-      if (isEditing) {
+      if (ContextManager.isEditingSnippet()) {
         panel.webview.postMessage({
           type: 'manualSyncResult',
           success: false,
@@ -273,8 +276,8 @@ export class SettingsWebviewProvider {
         throw new Error('扩展上下文未初始化');
       }
 
-      const cloudSyncManager = new CloudSyncManager(context);
       const storageManager = new StorageManager(context);
+      const cloudSyncManager = new CloudSyncManager(context, storageManager);
 
       const [snippets, directories] = await Promise.all([
         storageManager.getAllSnippets(),
@@ -282,7 +285,7 @@ export class SettingsWebviewProvider {
       ]);
 
       const result = await cloudSyncManager.performSync(snippets, directories);
-
+      
       panel.webview.postMessage({
         type: 'manualSyncResult',
         success: result.success,
@@ -337,11 +340,11 @@ export class SettingsWebviewProvider {
           success: false,
           message: '用户取消导出操作'
         });
-        return;
-      }
+      return;
+    }
 
-      const config = SettingsManager.getCloudSyncConfig();
-      const status = SettingsManager.getCloudSyncStatus();
+    const config = SettingsManager.getCloudSyncConfig();
+    const status = SettingsManager.getCloudSyncStatus();
       
       // 创建完整的导出数据
       const exportData = {
@@ -378,8 +381,8 @@ export class SettingsWebviewProvider {
 
       if (uri) {
         await vscode.workspace.fs.writeFile(uri, Buffer.from(exportJson, 'utf8'));
-        
-        panel.webview.postMessage({
+
+    panel.webview.postMessage({
           type: 'exportResult',
           success: true,
           message: '设置导出成功（包含完整配置）'
@@ -522,7 +525,120 @@ export class SettingsWebviewProvider {
     }
   }
 
+  private async _forceResetCloudSync(panel: vscode.WebviewPanel) {
+    try {
+      // 检查是否正在编辑代码片段
+      if (ContextManager.isEditingSnippet()) {
+        panel.webview.postMessage({
+          type: 'forceResetResult',
+          success: false,
+          message: '用户正在编辑代码片段，请完成编辑后再进行重置'
+        });
+        return;
+      }
 
+      // 显示严重警告
+      const warningMessage = `⚠️ 危险操作警告 ⚠️
+
+此操作将：
+• 清空云端所有同步文件
+• 清空本地历史记录
+• 重新初始化云端同步
+
+这是一个不可逆的操作！
+请确保您了解此操作的后果。
+
+是否继续？`;
+
+      const choice = await vscode.window.showWarningMessage(
+        warningMessage,
+        { modal: true },
+        '我了解风险，继续执行',
+        '取消'
+      );
+
+      if (choice !== '我了解风险，继续执行') {
+        panel.webview.postMessage({
+          type: 'forceResetResult',
+          success: false,
+          message: '用户取消了重置操作'
+        });
+        return;
+      }
+
+      // 二次确认
+      const finalConfirm = await vscode.window.showWarningMessage(
+        '🚨 最后确认：此操作将完全重置云端同步，无法撤销！',
+        { modal: true },
+        '确认执行',
+        '取消'
+      );
+
+      if (finalConfirm !== '确认执行') {
+        panel.webview.postMessage({
+          type: 'forceResetResult',
+          success: false,
+          message: '用户取消了重置操作'
+        });
+        return;
+      }
+
+      // 发送开始重置消息
+      panel.webview.postMessage({
+        type: 'forceResetStarted',
+        message: '正在执行强制重置...'
+      });
+
+      // 获取扩展上下文和存储管理器
+      const context = SettingsManager.getExtensionContext();
+      if (!context) {
+        throw new Error('扩展上下文未初始化');
+      }
+
+      // 创建存储管理器实例
+      const storageManager = new StorageManager(context);
+      const cloudSyncManager = new CloudSyncManager(context, storageManager);
+      
+      if (!cloudSyncManager.isConfigured()) {
+        throw new Error('云端同步未配置，请先完成配置');
+      }
+
+      // 获取当前代码片段和目录
+      const [snippets, directories] = await Promise.all([
+        storageManager.getAllSnippets(),
+        storageManager.getAllDirectories()
+      ]);
+
+      // 执行强制重置
+      const result = await cloudSyncManager.forceResetCloudSync(snippets, directories);
+      
+      // 发送结果消息
+      panel.webview.postMessage({
+        type: 'forceResetResult',
+        success: result.success,
+        message: result.message
+      });
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`✅ ${result.message}`);
+        // 重新发送配置和状态到webview
+        await this._sendConfigToWebview(panel);
+      } else {
+        vscode.window.showErrorMessage(`❌ ${result.message}`);
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '强制重置失败';
+      
+      panel.webview.postMessage({
+        type: 'forceResetResult',
+        success: false,
+        message: errorMessage
+      });
+
+      vscode.window.showErrorMessage(`❌ 强制重置失败: ${errorMessage}`);
+    }
+  }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
     return `<!DOCTYPE html>
@@ -733,7 +849,7 @@ export class SettingsWebviewProvider {
 <body>
     <div class="container">
         <div class="header">
-            <h1>☁️ 云端同步设置</h1>
+            <h1>☁️ 云端同步设置(🧪实验性功能)</h1>
             <p>配置 S3 兼容存储服务，实现代码片段的云端同步</p>
         </div>
         
@@ -827,6 +943,25 @@ export class SettingsWebviewProvider {
             <button id="resetBtn" class="btn btn-danger">重置配置</button>
         </div>
 
+        <!-- 危险操作区域 -->
+        <div class="section">
+            <div class="section-title" style="color: var(--vscode-errorForeground);">🚨 危险操作</div>
+            <p class="help-text">
+                <strong style="color: var(--vscode-errorForeground);">强制重置云端同步：</strong>
+                清空云端所有同步文件和本地历史记录，然后重新初始化云端同步。
+                <br><br>
+                <span style="color: var(--vscode-errorForeground);">⚠️ 这是一个不可逆的操作！只有在遇到严重同步问题时才使用此功能。</span>
+                <br><br>
+                <strong>使用场景：</strong>
+                <br>• 多设备同步出现严重冲突
+                <br>• 历史记录损坏导致无法同步
+                <br>• 需要完全重新开始同步
+            </p>
+            <div class="button-group">
+                <button id="forceResetBtn" class="btn btn-danger">🚨 强制重置云端同步</button>
+            </div>
+        </div>
+
         <!-- 导入导出按钮 -->
         <div class="section">
             <div class="section-title">配置管理</div>
@@ -869,6 +1004,7 @@ export class SettingsWebviewProvider {
         const resetBtn = document.getElementById('resetBtn');
         const exportBtn = document.getElementById('exportBtn');
         const importBtn = document.getElementById('importBtn');
+        const forceResetBtn = document.getElementById('forceResetBtn');
 
         // 显示状态消息
         function showStatus(message, type = 'info') {
@@ -968,9 +1104,9 @@ export class SettingsWebviewProvider {
         });
 
         resetBtn.addEventListener('click', () => {
-            vscode.postMessage({
-                type: 'resetConfig'
-            });
+                vscode.postMessage({
+                    type: 'resetConfig'
+                });
         });
 
         exportBtn.addEventListener('click', () => {
@@ -988,6 +1124,15 @@ export class SettingsWebviewProvider {
             
             vscode.postMessage({
                 type: 'importSettings'
+            });
+        });
+
+        forceResetBtn.addEventListener('click', () => {
+            forceResetBtn.disabled = true;
+            forceResetBtn.textContent = '🚨 重置中...';
+            
+            vscode.postMessage({
+                type: 'forceResetCloudSync'
             });
         });
 
@@ -1052,6 +1197,16 @@ export class SettingsWebviewProvider {
                     
                 case 'resetSuccess':
                     showStatus(message.message, 'success');
+                    break;
+
+                case 'forceResetStarted':
+                    showStatus(message.message, 'warning');
+                    break;
+
+                case 'forceResetResult':
+                    forceResetBtn.disabled = false;
+                    forceResetBtn.textContent = '🚨 强制重置云端同步';
+                    showStatus(message.message, message.success ? 'success' : 'error');
                     break;
             }
         });

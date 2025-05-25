@@ -11,6 +11,8 @@ import { HistoryWebviewProvider } from './explorer/historyWebviewProvider';
 import { SettingsManager } from './utils/settingsManager';
 import { CloudSyncManager } from './utils/cloudSyncManager';
 import { AutoSyncManager } from './utils/autoSyncManager';
+import { ContextManager } from './utils/contextManager';
+import { SyncStatusManager } from './utils/syncStatusManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.time('starcode-snippets:activate');
@@ -33,6 +35,10 @@ export function activate(context: vscode.ExtensionContext): void {
     console.log('创建自动同步管理器...');
     const autoSyncManager = new AutoSyncManager(context, storageManager);
     
+    // 初始化同步状态管理器
+    console.log('初始化同步状态管理器...');
+    const syncStatusManager = SyncStatusManager.getInstance(context);
+    
     // 创建树视图数据提供程序
     console.log('创建树视图数据提供程序...');
     const treeDataProvider = new SnippetsTreeDataProvider(storageManager, searchManager);
@@ -43,23 +49,35 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     
     // 注册树视图
-    console.log('注册树视图 copyCodeExplorer...');
-    const treeView = vscode.window.createTreeView('copyCodeExplorer', {
+    console.log('注册树视图 starCodeSnippetsExplorer...');
+    const treeView = vscode.window.createTreeView('starCodeSnippetsExplorer', {
       treeDataProvider: treeDataProvider,
-      showCollapseAll: true
+      showCollapseAll: true,
+      canSelectMany: false
     });
     
     console.log('树视图注册成功，ID:', treeView.title);
     
-    // 将树视图添加到上下文订阅中
+    // 将树视图和数据提供程序添加到上下文订阅中
     context.subscriptions.push(treeView);
+    context.subscriptions.push({
+      dispose: () => {
+        treeDataProvider.dispose();
+      }
+    });
 
-    // 延迟初始化编辑器和注册命令
+    // 确保树视图在激活后能正确显示内容
     setTimeout(() => {
-      console.log('开始延迟初始化...');
+      treeDataProvider.refresh();
+    }, 100);
+
+
+
+    // 立即初始化编辑器和注册命令（不使用延迟）
+    console.log('开始初始化编辑器和命令...');
       
       try {
-        // 初始化代码片段编辑器
+      // 初始化代码片段编辑器
         console.log('初始化代码片段编辑器...');
         const snippetEditor = SnippetEditor.initialize(context, storageManager);
         
@@ -79,26 +97,40 @@ export function activate(context: vscode.ExtensionContext): void {
           await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
         });
         context.subscriptions.push(finishEditing);
+
+
         
         // 注册所有命令
         console.log('注册所有命令...');
-        const commands = registerCommands(context, storageManager, treeDataProvider, searchManager, autoSyncManager);
+      const commands = registerCommands(context, storageManager, treeDataProvider, searchManager, autoSyncManager);
         
         // 添加命令到订阅中
         context.subscriptions.push(...commands);
-        
-        // 添加自动同步管理器到订阅中，确保扩展停用时清理
-        context.subscriptions.push({
-          dispose: () => autoSyncManager.dispose()
-        });
+      
+      // 添加自动同步管理器到订阅中，确保扩展停用时清理
+      context.subscriptions.push({
+        dispose: () => {
+          autoSyncManager.dispose();
+          syncStatusManager.dispose();
+        }
+      });
         
         console.log('StarCode Snippets 扩展激活完成');
         console.timeEnd('starcode-snippets:activate');
+      
+      // 延迟启动自动同步（如果配置了的话）
+      setTimeout(() => {
+        const config = SettingsManager.getCloudSyncConfig();
+        if (config.autoSync) {
+          console.log('配置中启用了自动同步，正在启动...');
+          autoSyncManager.start();
+        }
+      }, 2000); // 延迟2秒启动，确保扩展完全初始化
+      
       } catch (error) {
-        console.error('延迟初始化过程中发生错误:', error);
+      console.error('初始化过程中发生错误:', error);
         vscode.window.showErrorMessage(`StarCode Snippets 初始化失败: ${error}`);
       }
-    }, 100);
     
   } catch (error) {
     console.error('StarCode Snippets 扩展激活失败:', error);
@@ -167,43 +199,51 @@ function registerCommands(
     }
   }
 
+  // 注册刷新浏览器命令
+  const refreshExplorer = vscode.commands.registerCommand(
+    'starcode-snippets.refreshExplorer',
+    () => {
+      refreshTreeView();
+    }
+  );
+
   // 注册保存代码片段命令
   const saveToLibrary = vscode.commands.registerCommand(
     'starcode-snippets.saveToLibrary', 
     async () => {
       const editor = vscode.window.activeTextEditor;
-      if (editor) {
+    if (editor) {
         const selection = editor.selection;
         const code = editor.document.getText(selection);
         const fileName = editor.document.fileName.split('/').pop() || '';
 
-        const name = await vscode.window.showInputBox({
-          prompt: '为代码片段命名',
-          placeHolder: '输入代码片段名称',
+      const name = await vscode.window.showInputBox({
+        prompt: '为代码片段命名',
+        placeHolder: '输入代码片段名称',
         });
 
-        if (name) {
+      if (name) {
           const directories = await storageManager.getAllDirectories();
-          const directoryItems = [
-            { label: '根目录', id: null },
-            ...directories.map((dir) => ({ label: dir.name, id: dir.id })),
+        const directoryItems = [
+          { label: '根目录', id: null },
+          ...directories.map((dir) => ({ label: dir.name, id: dir.id })),
           ];
 
-          const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
-            placeHolder: '选择保存位置',
+        const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
+          placeHolder: '选择保存位置',
           });
 
-          if (selectedDirectory) {
+        if (selectedDirectory) {
             const isDuplicate = await checkDuplicateSnippetName(name, selectedDirectory.id);
-            if (isDuplicate) {
+          if (isDuplicate) {
               vscode.window.showErrorMessage(`所选目录中已存在名为 "${name}" 的代码片段`);
               return;
-            }
+          }
 
             // 自动检测语言
             let language = 'plaintext';
             const fileExt = fileName.split('.').pop()?.toLowerCase();
-            if (fileExt) {
+          if (fileExt) {
               const langMap: { [key: string]: string } = {
                 'ts': 'typescript', 'js': 'javascript', 'html': 'html',
                 'css': 'css', 'json': 'json', 'vue': 'vue',
@@ -214,10 +254,10 @@ function registerCommands(
                 'yml': 'yaml', 'yaml': 'yaml', 'sh': 'shell', 'bash': 'shell'
               };
               language = langMap[fileExt] || 'plaintext';
-            }
+          }
 
             // 内容检测
-            if (language === 'plaintext') {
+          if (language === 'plaintext') {
               if (code.includes('<template>') && code.includes('<script')) {
                 language = 'vue';
               } else if (code.includes('<!DOCTYPE html>') || (code.includes('<html') && code.includes('<body'))) {
@@ -225,23 +265,23 @@ function registerCommands(
               } else if (code.includes('function') || code.includes('const ') || code.includes('let ')) {
                 if (code.includes(': string') || code.includes('interface ')) {
                   language = 'typescript';
-                } else {
+              } else {
                   language = 'javascript';
-                }
               }
             }
+          }
 
-            const snippet: CodeSnippet = {
-              id: uuidv4(),
-              name,
-              code,
-              fileName,
+          const snippet: CodeSnippet = {
+            id: uuidv4(),
+            name,
+            code,
+            fileName,
               filePath: editor.document.fileName,
-              category: selectedDirectory.label,
-              parentId: selectedDirectory.id,
-              order: 0,
-              createTime: Date.now(),
-              language: language,
+            category: selectedDirectory.label,
+            parentId: selectedDirectory.id,
+            order: 0,
+            createTime: Date.now(),
+            language: language,
             };
 
             await storageManager.saveSnippet(snippet);
@@ -324,31 +364,31 @@ function registerCommands(
     async (item: any) => {
       if (!item) return;
 
-      const newName = await vscode.window.showInputBox({
-        prompt: '重命名...',
-        value: item.label,
+    const newName = await vscode.window.showInputBox({
+      prompt: '重命名...',
+      value: item.label,
       });
 
-      if (newName) {
-        if (item.snippet) {
+    if (newName) {
+      if (item.snippet) {
           const isDuplicate = await checkDuplicateSnippetName(newName, item.snippet.parentId);
-          if (isDuplicate) {
+        if (isDuplicate) {
             vscode.window.showErrorMessage(`所选目录中已存在名为 "${newName}" 的代码片段`);
             return;
-          }
+        }
           const updatedSnippet = { ...item.snippet, name: newName };
           await storageManager.updateSnippet(updatedSnippet);
-        } else if (item.directory) {
+      } else if (item.directory) {
           const isDuplicate = await checkDuplicateDirectoryName(newName, item.directory.parentId);
-          if (isDuplicate) {
+        if (isDuplicate) {
             vscode.window.showErrorMessage(`当前层级已存在名为 "${newName}" 的目录`);
             return;
-          }
+        }
           const updatedDirectory = { ...item.directory, name: newName };
           await storageManager.updateDirectory(updatedDirectory);
-        }
-        refreshTreeView();
       }
+        refreshTreeView();
+    }
     }
   );
 
@@ -356,23 +396,23 @@ function registerCommands(
   const createDirectory = vscode.commands.registerCommand(
     'starcode-snippets.createDirectory', 
     async () => {
-      const name = await vscode.window.showInputBox({
-        prompt: '输入目录名',
-        placeHolder: '新建目录',
+    const name = await vscode.window.showInputBox({
+      prompt: '输入目录名',
+      placeHolder: '新建目录',
       });
 
-      if (name) {
+    if (name) {
         const isDuplicate = await checkDuplicateDirectoryName(name, null);
-        if (isDuplicate) {
+      if (isDuplicate) {
           vscode.window.showErrorMessage(`根目录下已存在名为 "${name}" 的目录`);
           return;
-        }
+      }
 
-        const directory: Directory = {
-          id: uuidv4(),
-          name,
-          parentId: null,
-          order: 0,
+      const directory: Directory = {
+        id: uuidv4(),
+        name,
+        parentId: null,
+        order: 0,
         };
         await storageManager.createDirectory(directory);
         refreshTreeView();
@@ -468,16 +508,16 @@ function registerCommands(
     async (item: any) => {
       if (!item) return;
 
-      const confirmMessage = item.snippet
-        ? `确定要删除代码片段 "${item.snippet.name}" 吗？`
+    const confirmMessage = item.snippet
+      ? `确定要删除代码片段 "${item.snippet.name}" 吗？`
         : `确定要删除目录 "${item.directory.name}" 及其所有内容吗？`;
 
       const confirm = await vscode.window.showWarningMessage(confirmMessage, { modal: true }, '确定');
 
-      if (confirm === '确定') {
-        if (item.snippet) {
+    if (confirm === '确定') {
+      if (item.snippet) {
           await storageManager.deleteSnippet(item.snippet.id);
-        } else if (item.directory) {
+      } else if (item.directory) {
           await storageManager.deleteDirectory(item.directory.id);
         }
         refreshTreeView();
@@ -492,9 +532,9 @@ function registerCommands(
       if (!item?.snippet) return;
 
       const editor = vscode.window.activeTextEditor;
-      if (editor) {
+    if (editor) {
         const position = editor.selection.active;
-        await editor.edit((editBuilder) => {
+      await editor.edit((editBuilder) => {
           editBuilder.insert(position, item.snippet.code);
         });
       }
@@ -512,7 +552,7 @@ function registerCommands(
       } catch (error) {
         console.error('编辑代码片段失败:', error);
         vscode.window.showErrorMessage(`编辑代码片段失败: ${error}`);
-      }
+    }
     }
   );
 
@@ -523,26 +563,26 @@ function registerCommands(
       if (!item?.snippet) return;
 
       const directories = await storageManager.getAllDirectories();
-      const directoryItems = [
-        { label: '根目录', id: null },
+    const directoryItems = [
+      { label: '根目录', id: null },
         ...directories.map((dir: Directory) => ({ label: dir.name, id: dir.id })),
       ];
 
-      const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
-        placeHolder: '选择目标目录',
+    const selectedDirectory = await vscode.window.showQuickPick(directoryItems, {
+      placeHolder: '选择目标目录',
       });
 
-      if (selectedDirectory) {
+    if (selectedDirectory) {
         const isDuplicate = await checkDuplicateSnippetName(item.snippet.name, selectedDirectory.id);
-        if (isDuplicate) {
+      if (isDuplicate) {
           vscode.window.showErrorMessage(`目标目录中已存在名为 "${item.snippet.name}" 的代码片段`);
           return;
-        }
+      }
 
-        const updatedSnippet = {
-          ...item.snippet,
-          parentId: selectedDirectory.id,
-          category: selectedDirectory.label,
+      const updatedSnippet = {
+        ...item.snippet,
+        parentId: selectedDirectory.id,
+        category: selectedDirectory.label,
         };
         await storageManager.updateSnippet(updatedSnippet);
         refreshTreeView();
@@ -632,10 +672,10 @@ function registerCommands(
       console.log('viewHistory 命令被调用');
       try {
         HistoryWebviewProvider.createOrShow(context.extensionUri);
-      } catch (error) {
+    } catch (error) {
         console.error('viewHistory 命令执行失败:', error);
         vscode.window.showErrorMessage(`查看历史记录失败: ${error}`);
-      }
+    }
     }
   );
 
@@ -643,15 +683,14 @@ function registerCommands(
   const manualSync = vscode.commands.registerCommand(
     'starcode-snippets.manualSync',
     async () => {
-      try {
+    try {
         // 检查是否正在编辑代码片段
-        const isEditing = await vscode.commands.executeCommand('getContext', 'starcode-snippets.isEditingSnippet') as boolean;
-        if (isEditing) {
+        if (ContextManager.isEditingSnippet()) {
           vscode.window.showWarningMessage('用户正在编辑代码片段，请完成编辑后再进行同步', '我知道了');
           return;
         }
         
-        const cloudSyncManager = new CloudSyncManager(context);
+        const cloudSyncManager = new CloudSyncManager(context, storageManager);
         
         if (!cloudSyncManager.isConfigured()) {
           const action = await vscode.window.showWarningMessage(
@@ -661,10 +700,10 @@ function registerCommands(
           );
           if (action === '打开设置') {
             vscode.commands.executeCommand('starcode-snippets.openSettings');
-          }
-          return;
         }
-
+          return;
+      }
+      
         // 使用进度条显示同步过程
         await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
@@ -687,14 +726,40 @@ function registerCommands(
           if (result.success) {
             vscode.window.showInformationMessage(`✅ 同步成功: ${result.message}`);
             refreshTreeView();
-          } else {
+      } else {
             vscode.window.showErrorMessage(`❌ 同步失败: ${result.message}`);
           }
         });
-        
-      } catch (error) {
+      
+    } catch (error) {
         console.error('手动同步失败:', error);
         vscode.window.showErrorMessage(`❌ 手动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+    }
+  );
+
+  // 注册同步状态查看命令
+  const showSyncStatus = vscode.commands.registerCommand(
+    'starcode-snippets.showSyncStatus',
+    async () => {
+      try {
+        const syncStatusManager = SyncStatusManager.getInstance(context);
+        const report = syncStatusManager.generateSyncReport();
+        
+        // 创建临时文档显示报告
+        const doc = await vscode.workspace.openTextDocument({
+          content: report,
+          language: 'markdown'
+        });
+        
+        await vscode.window.showTextDocument(doc, {
+          viewColumn: vscode.ViewColumn.Beside,
+          preview: true
+        });
+        
+      } catch (error) {
+        console.error('获取同步状态失败:', error);
+        vscode.window.showErrorMessage(`获取同步状态失败: ${error instanceof Error ? error.message : '未知错误'}`);
       }
     }
   );
@@ -703,7 +768,7 @@ function registerCommands(
   const startAutoSync = vscode.commands.registerCommand(
     'starcode-snippets.startAutoSync',
     async () => {
-      try {
+    try {
         autoSyncManager.start();
         vscode.window.showInformationMessage('🔄 自动同步已启动');
       } catch (error) {
@@ -719,30 +784,30 @@ function registerCommands(
       try {
         autoSyncManager.stop();
         vscode.window.showInformationMessage('⏹️ 自动同步已停止');
-      } catch (error) {
+    } catch (error) {
         console.error('停止自动同步失败:', error);
         vscode.window.showErrorMessage(`停止自动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      }
+    }
     }
   );
 
   const restartAutoSync = vscode.commands.registerCommand(
     'starcode-snippets.restartAutoSync',
     async () => {
-      try {
+    try {
         autoSyncManager.restart();
         vscode.window.showInformationMessage('🔄 自动同步已重启');
-      } catch (error) {
+    } catch (error) {
         console.error('重启自动同步失败:', error);
         vscode.window.showErrorMessage(`重启自动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      }
+    }
     }
   );
 
   const autoSyncStatus = vscode.commands.registerCommand(
     'starcode-snippets.autoSyncStatus',
     async () => {
-      try {
+    try {
         const status = autoSyncManager.getStatus();
         const config = SettingsManager.getCloudSyncConfig();
         
@@ -753,26 +818,22 @@ function registerCommands(
         if (status.isRunning && status.nextSyncTime) {
           message += `下次同步: ${status.nextSyncTime.toLocaleString()}`;
         }
-        
-        vscode.window.showInformationMessage(message);
+      
+      vscode.window.showInformationMessage(message);
       } catch (error) {
         console.error('获取自动同步状态失败:', error);
         vscode.window.showErrorMessage(`获取状态失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      }
+    }
     }
   );
 
-  // 启动时检查是否需要启动自动同步
-  setTimeout(() => {
-    const config = SettingsManager.getCloudSyncConfig();
-    if (config.autoSync) {
-      console.log('配置中启用了自动同步，正在启动...');
-      autoSyncManager.start();
-    }
-  }, 2000); // 延迟2秒启动，确保扩展完全初始化
+
+
+
 
   // 返回所有注册的命令
   return [
+    refreshExplorer,
     saveToLibrary,
     previewSnippet,
     renameItem,
@@ -792,6 +853,7 @@ function registerCommands(
     openSettings,
     viewHistory,
     manualSync,
+    showSyncStatus,
     startAutoSync,
     stopAutoSync,
     restartAutoSync,

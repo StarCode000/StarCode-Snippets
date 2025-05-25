@@ -3,6 +3,7 @@ import * as vscode from 'vscode'
 import { CodeSnippet } from '../models/types'
 // import { v4 as uuidv4 } from 'uuidv4' // May not be needed for panel keys if snippet ID is used
 import { StorageManager } from '../storage/storageManager'
+import { ContextManager } from '../utils/contextManager'
 
 /**
  * SnippetEditor负责创建和管理代码片段编辑会话 (使用WebView)
@@ -111,7 +112,7 @@ export class SnippetEditor {
       }
       this.editingWebviews.delete(snippet.id);
       if (this.editingWebviews.size === 0) {
-        vscode.commands.executeCommand('setContext', 'starcode-snippets.isEditingSnippet', false);
+        ContextManager.setEditingSnippet(false);
       }
     }, null, this.extensionContext.subscriptions);
 
@@ -183,7 +184,7 @@ export class SnippetEditor {
       this.extensionContext.subscriptions
     );
     
-    vscode.commands.executeCommand('setContext', 'starcode-snippets.isEditingSnippet', true);
+    ContextManager.setEditingSnippet(true);
   }
 
   private mapLanguageToVSCode(language: string): string {

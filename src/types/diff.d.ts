@@ -12,11 +12,30 @@ declare module 'diff' {
   export function diffWords(oldStr: string, newStr: string): Change[];
 }
 
-declare module 'diff3' {
-  export interface MergeResult {
-    conflict: boolean;
-    result: string[];
+declare module 'node-diff3' {
+  export interface MergeOptions {
+    excludeFalseConflicts?: boolean;
+    stringSeparator?: string | RegExp;
   }
 
-  export function diff3Merge(a: string, o: string, b: string): MergeResult;
+  export interface MergeBlock {
+    ok?: string[];
+    conflict?: {
+      a: string[];
+      aIndex: number;
+      o: string[];
+      oIndex: number;
+      b: string[];
+      bIndex: number;
+    };
+  }
+
+  export type MergeResult = MergeBlock[];
+
+  export function diff3Merge(
+    a: string[] | string, 
+    o: string[] | string, 
+    b: string[] | string, 
+    options?: MergeOptions
+  ): MergeResult;
 } 

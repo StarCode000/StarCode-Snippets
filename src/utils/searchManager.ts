@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CodeSnippet, Directory } from '../models/types';
+import { ContextManager } from './contextManager';
 
 export enum SearchMode {
   NAME = 'name',
@@ -48,7 +49,7 @@ export class SearchManager {
       this._isActive = this._searchQuery.length > 0;
       
       // 更新上下文
-      vscode.commands.executeCommand('setContext', 'starcode-snippets.hasActiveSearch', this._isActive);
+      ContextManager.setActiveSearch(this._isActive);
       
       this._onDidChangeSearch.fire();
       
@@ -68,7 +69,7 @@ export class SearchManager {
     this._isActive = false;
     
     // 更新上下文
-    vscode.commands.executeCommand('setContext', 'starcode-snippets.hasActiveSearch', false);
+    ContextManager.setActiveSearch(false);
     
     this._onDidChangeSearch.fire();
     vscode.window.showInformationMessage('已清除搜索');

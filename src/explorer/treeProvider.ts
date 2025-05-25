@@ -53,6 +53,7 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   private _directories: Directory[] = []
   private _initialized: boolean = false
   private _searchManager: SearchManager
+  private _statusUpdateTimer: NodeJS.Timeout | undefined
 
   constructor(private storageManager: StorageManager, searchManager: SearchManager) {
     this._searchManager = searchManager
@@ -62,21 +63,85 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       this.refresh()
     })
 
+    // 启动状态更新定时器（每0.5秒更新一次）
+    this._startStatusUpdateTimer()
+
     // 立即加载数据
     this._loadData()
       .then(() => {
         console.log('TreeDataProvider 初始化完成')
         this._initialized = true
+        // 初始化完成后立即触发刷新
+        this._onDidChangeTreeData.fire()
       })
       .catch((error) => {
         console.error('TreeDataProvider 初始化失败:', error)
+        // 即使失败也标记为已初始化，避免无限等待
+        this._initialized = true
+        this._onDidChangeTreeData.fire()
       })
+  }
+
+  /**
+   * 启动状态更新定时器
+   */
+  private _startStatusUpdateTimer(): void {
+    // 清除现有定时器
+    if (this._statusUpdateTimer) {
+      clearInterval(this._statusUpdateTimer)
+    }
+
+    // 每0.5秒更新一次状态显示
+    this._statusUpdateTimer = setInterval(() => {
+      // 只刷新根节点的状态显示，不重新加载数据
+      this._onDidChangeTreeData.fire()
+    }, 500)
+  }
+
+  /**
+   * 停止状态更新定时器
+   */
+  private _stopStatusUpdateTimer(): void {
+    if (this._statusUpdateTimer) {
+      clearInterval(this._statusUpdateTimer)
+      this._statusUpdateTimer = undefined
+    }
+  }
+
+  /**
+   * 销毁资源
+   */
+  dispose(): void {
+    this._stopStatusUpdateTimer()
   }
 
   refresh(): void {
     this._loadData().then(() => {
       this._onDidChangeTreeData.fire()
     })
+  }
+
+  /**
+   * 生成同步时间显示文本
+   */
+  private _generateSyncTimeText(lastSyncTime: number): string {
+    const now = Date.now()
+    const diffSeconds = Math.floor((now - lastSyncTime) / 1000)
+    
+    if (diffSeconds <= 15) {
+      return '刚刚同步'
+    } else if (diffSeconds < 60) {
+      return `${diffSeconds}秒前同步`
+    } else if (diffSeconds < 3600) {
+      const diffMinutes = Math.floor(diffSeconds / 60)
+      return `${diffMinutes}分钟前同步`
+    } else if (diffSeconds < 86400) {
+      const diffHours = Math.floor(diffSeconds / 3600)
+      return `${diffHours}小时前同步`
+    } else {
+      const diffDays = Math.floor(diffSeconds / 86400)
+      return `${diffDays}天前同步`
+    }
   }
 
   private async _loadData(): Promise<void> {
@@ -102,10 +167,16 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   }
 
   async getChildren(element?: SnippetTreeItem): Promise<SnippetTreeItem[]> {
+    
     // 如果数据还没加载完成，先等待数据加载
     if (!this._initialized) {
-      await this._loadData()
-      this._initialized = true
+      try {
+        await this._loadData()
+        this._initialized = true
+      } catch (error) {
+        console.error('数据加载失败:', error);
+        this._initialized = true; // 即使失败也标记为已初始化
+      }
     }
 
     // 应用搜索过滤
@@ -117,41 +188,41 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       const rootItems: SnippetTreeItem[] = []
 
       // 显示云端同步状态
-      const syncStatus = SettingsManager.getCloudSyncStatus()
-      const syncConfig = SettingsManager.getCloudSyncConfig()
+      let syncStatus: any = { isConnected: false, lastSyncTime: null, lastError: null, isSyncing: false };
+      let syncConfig: any = { endpoint: '', autoSync: false };
       
-      if (syncConfig.endpoint) {
+      try {
+        syncStatus = SettingsManager.getCloudSyncStatus()
+        syncConfig = SettingsManager.getCloudSyncConfig()
+      } catch (error) {
+        console.error('获取同步配置失败:', error);
+      }
+      
+      // 始终显示同步状态，无论是否配置
+      {
         let statusText = ''
         let statusIcon = ''
         
-        if (syncStatus.isSyncing) {
-          statusText = '☁️ 正在同步...'
+        if (!syncConfig.endpoint) {
+          statusText = '未配置云端同步'
+          statusIcon = 'cloud-offline'
+        } else if (syncStatus.isSyncing) {
+          statusText = '正在同步...'
           statusIcon = 'sync~spin'
         } else if (syncStatus.isConnected) {
           if (syncStatus.lastSyncTime) {
-            const lastSync = new Date(syncStatus.lastSyncTime)
-            const now = new Date()
-            const diffMinutes = Math.floor((now.getTime() - lastSync.getTime()) / (1000 * 60))
-            
-            if (diffMinutes < 1) {
-              statusText = '☁️ 刚刚同步'
-            } else if (diffMinutes < 60) {
-              statusText = `☁️ ${diffMinutes}分钟前同步`
-            } else {
-              const diffHours = Math.floor(diffMinutes / 60)
-              statusText = `☁️ ${diffHours}小时前同步`
-            }
+            statusText = this._generateSyncTimeText(syncStatus.lastSyncTime)
           } else {
-            statusText = '☁️ 已连接，未同步'
+            statusText = '已连接，未同步'
           }
           statusIcon = 'cloud'
         } else {
-          statusText = '☁️ 未连接'
+          statusText = '未连接'
           statusIcon = 'cloud-offline'
         }
         
         if (syncStatus.lastError) {
-          statusText += ` (${syncStatus.lastError})`
+          statusText += ` (错误)`
           statusIcon = 'warning'
         }
         
@@ -161,11 +232,14 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         )
         syncStatusItem.contextValue = 'syncStatus'
         syncStatusItem.iconPath = new vscode.ThemeIcon(statusIcon)
-        syncStatusItem.tooltip = `点击打开云端同步设置\n\n配置: ${syncConfig.endpoint}\n状态: ${syncStatus.isConnected ? '已连接' : '未连接'}`
+        syncStatusItem.tooltip = `点击打开云端同步设置\n\n配置: ${syncConfig.endpoint || '未配置'}\n状态: ${syncConfig.endpoint ? (syncStatus.isConnected ? '已连接' : '未连接') : '未配置'}`
         syncStatusItem.command = {
           command: 'starcode-snippets.openSettings',
           title: '打开云端同步设置'
         }
+        // 确保项目可见
+        syncStatusItem.resourceUri = undefined
+        syncStatusItem.description = undefined
         rootItems.push(syncStatusItem)
       }
 

@@ -1,11 +1,14 @@
 import * as crypto from 'crypto';
+import * as vscode from 'vscode';
 import { CodeSnippet, Directory } from '../models/types';
+import { DeviceManager } from './deviceManager';
 
 // 操作类型枚举
 export enum OperationType {
   ADD = '+',
   MODIFY = '~',
-  DELETE = '-'
+  DELETE = '-',
+  FORCE_CLEAR = '!' // 强制清空操作
 }
 
 // 历史记录条目接口
@@ -14,6 +17,7 @@ export interface HistoryEntry {
   fullPath: string;
   hash: string;
   timestamp: string;
+  deviceTag?: string; // 设备标识码（可选，用于向后兼容）
 }
 
 // 变更集接口
@@ -23,11 +27,11 @@ export interface ChangeSet {
   deletedFiles: Array<{ path: string; hash: string }>;
   addedDirectories: Array<{ path: string; item: Directory }>;
   deletedDirectories: Array<{ path: string }>;
-}
+    }
 
 export class ChangelogManager {
   public static readonly HASH_PLACEHOLDER = '#';
-  
+
   /**
    * 解析历史记录文本为条目数组
    */
@@ -38,41 +42,53 @@ export class ChangelogManager {
     
     const lines = historyText.split('\n').filter(line => line.trim());
     const entries: HistoryEntry[] = [];
-    
+      
     for (const line of lines) {
       const parts = line.split(' | ');
-      if (parts.length !== 4) {
+      
+      // 支持新格式（5部分：操作|路径|哈希|时间戳|设备标识）和旧格式（4部分：操作|路径|哈希|时间戳）
+      if (parts.length !== 4 && parts.length !== 5) {
         console.warn(`跳过格式错误的历史记录行: ${line}`);
         continue;
       }
       
-      const [operation, fullPath, hash, timestamp] = parts;
-      
+      const [operation, fullPath, hash, timestamp, deviceTag] = parts;
+    
       if (!Object.values(OperationType).includes(operation as OperationType)) {
         console.warn(`跳过未知操作类型: ${operation}`);
         continue;
       }
-      
-      entries.push({
+
+      const entry: HistoryEntry = {
         operation: operation as OperationType,
         fullPath: fullPath.trim(),
         hash: hash.trim(),
         timestamp: timestamp.trim()
-      });
+      };
+      
+      // 如果有设备标识码，添加到条目中
+      if (deviceTag) {
+        entry.deviceTag = deviceTag.trim();
+      }
+
+      entries.push(entry);
     }
     
     return entries;
   }
-  
+
   /**
    * 将历史记录条目数组转换为文本
    */
   public static formatHistory(entries: HistoryEntry[]): string {
     return entries
-      .map(entry => `${entry.operation} | ${entry.fullPath} | ${entry.hash} | ${entry.timestamp}`)
+      .map(entry => {
+        const baseParts = `${entry.operation} | ${entry.fullPath} | ${entry.hash} | ${entry.timestamp}`;
+        return entry.deviceTag ? `${baseParts} | ${entry.deviceTag}` : baseParts;
+      })
       .join('\n');
   }
-  
+
   /**
    * 添加新的历史记录条目
    */
@@ -81,10 +97,13 @@ export class ChangelogManager {
     operation: OperationType,
     fullPath: string,
     hash: string,
-    timestamp?: string
+    timestamp?: string,
+    deviceTag?: string,
+    context?: vscode.ExtensionContext
   ): string {
     const entries = this.parseHistory(existingHistory);
     const newTimestamp = timestamp || new Date().toISOString();
+    const newDeviceTag = deviceTag || DeviceManager.getDeviceTag(context);
     
     // 检查是否为重复操作（连续的相同操作）
     if (entries.length > 0) {
@@ -94,20 +113,21 @@ export class ChangelogManager {
           lastEntry.hash === hash) {
         console.log(`跳过重复操作: ${operation} ${fullPath}`);
         return existingHistory;
-      }
+  }
     }
     
     const newEntry: HistoryEntry = {
       operation,
       fullPath,
       hash,
-      timestamp: newTimestamp
+      timestamp: newTimestamp,
+      deviceTag: newDeviceTag
     };
     
     entries.push(newEntry);
     return this.formatHistory(entries);
   }
-  
+
   /**
    * 计算代码片段或目录的哈希值
    */
@@ -137,7 +157,7 @@ export class ChangelogManager {
       .update(JSON.stringify(stableContent), 'utf8')
       .digest('hex');
   }
-  
+
   /**
    * 生成文件的完整路径
    */
@@ -153,11 +173,11 @@ export class ChangelogManager {
       }
       pathParts.unshift(parentDir.name);
       currentParentId = parentDir.parentId;
-    }
+      }
     
     if ('code' in item) {
-      // 代码片段文件
-      pathParts.push(`${item.name}.json`);
+      // 代码片段文件 - 历史记录路径不包含.json后缀
+      pathParts.push(item.name);
       return '/' + pathParts.join('/');
     } else {
       // 目录
@@ -165,7 +185,7 @@ export class ChangelogManager {
       return '/' + pathParts.join('/') + '/';
     }
   }
-  
+
   /**
    * 根据历史记录重建状态快照
    */
@@ -176,7 +196,7 @@ export class ChangelogManager {
     const entries = this.parseHistory(historyText);
     const files = new Map<string, { hash: string; timestamp: string }>();
     const directories = new Set<string>();
-    
+
     for (const entry of entries) {
       switch (entry.operation) {
         case OperationType.ADD:
@@ -211,12 +231,19 @@ export class ChangelogManager {
             files.delete(entry.fullPath);
           }
           break;
+          
+        case OperationType.FORCE_CLEAR:
+          // 强制清空操作，清空所有状态
+          files.clear();
+          directories.clear();
+          console.log(`执行强制清空操作: ${entry.timestamp}`);
+          break;
       }
     }
 
     return { files, directories };
   }
-  
+
   /**
    * 比较当前状态与历史记录状态，生成变更集
    */
@@ -232,11 +259,11 @@ export class ChangelogManager {
       addedDirectories: [],
       deletedDirectories: []
     };
-    
+      
     // 重建上次同步时的状态
     const { files: lastSyncFiles, directories: lastSyncDirs } = 
       this.rebuildStateFromHistory(lastSyncHistory);
-    
+      
     // 当前状态的路径映射
     const currentFilePaths = new Map<string, CodeSnippet>();
     const currentDirPaths = new Map<string, Directory>();
@@ -295,16 +322,21 @@ export class ChangelogManager {
         changeSet.deletedDirectories.push({ path: lastSyncPath });
       }
     }
-    
+
     return changeSet;
   }
-  
+
   /**
    * 将变更集转换为历史记录条目
    */
-  public static changeSetToHistoryEntries(changeSet: ChangeSet): HistoryEntry[] {
+  public static changeSetToHistoryEntries(
+    changeSet: ChangeSet, 
+    context?: vscode.ExtensionContext,
+    deviceTag?: string
+  ): HistoryEntry[] {
     const entries: HistoryEntry[] = [];
     const timestamp = new Date().toISOString();
+    const entryDeviceTag = deviceTag || DeviceManager.getDeviceTag(context);
     
     // 先添加目录（按层级顺序）
     const sortedDirs = changeSet.addedDirectories.sort((a, b) => {
@@ -318,17 +350,19 @@ export class ChangelogManager {
         operation: OperationType.ADD,
         fullPath: path,
         hash: this.HASH_PLACEHOLDER,
-        timestamp
+        timestamp,
+        deviceTag: entryDeviceTag
       });
-    }
-    
+  }
+
     // 添加新增文件
     for (const { path, item } of changeSet.addedFiles) {
       entries.push({
         operation: OperationType.ADD,
         fullPath: path,
         hash: this.calculateItemHash(item),
-        timestamp
+        timestamp,
+        deviceTag: entryDeviceTag
       });
     }
     
@@ -338,20 +372,22 @@ export class ChangelogManager {
         operation: OperationType.MODIFY,
         fullPath: path,
         hash: this.calculateItemHash(item),
-        timestamp
-      });
-    }
-    
+        timestamp,
+        deviceTag: entryDeviceTag
+        });
+      }
+
     // 删除文件（先删除文件，再删除目录）
     for (const { path, hash } of changeSet.deletedFiles) {
       entries.push({
         operation: OperationType.DELETE,
         fullPath: path,
         hash: this.HASH_PLACEHOLDER,
-        timestamp
-      });
-    }
-    
+        timestamp,
+        deviceTag: entryDeviceTag
+        });
+      }
+      
     // 删除目录（按层级倒序）
     const sortedDelDirs = changeSet.deletedDirectories.sort((a, b) => {
       const aDepth = (a.path.match(/\//g) || []).length;
@@ -364,13 +400,14 @@ export class ChangelogManager {
         operation: OperationType.DELETE,
         fullPath: path,
         hash: this.HASH_PLACEHOLDER,
-        timestamp
+        timestamp,
+        deviceTag: entryDeviceTag
       });
     }
     
     return entries;
   }
-  
+
   /**
    * 验证历史记录的完整性
    */
@@ -385,8 +422,8 @@ export class ChangelogManager {
     // 检查第一条记录必须是新增操作
     if (entries[0].operation !== OperationType.ADD) {
       errors.push('历史记录的第一条记录必须是新增操作');
-    }
-    
+      }
+      
     // 检查时间戳顺序
     for (let i = 1; i < entries.length; i++) {
       const prevTime = new Date(entries[i - 1].timestamp);

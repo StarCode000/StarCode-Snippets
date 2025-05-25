@@ -3,3 +3,6 @@ dist/
 out/
 .vscode-test/
 *.vsix
+*.md
+!README.md
+!CHANGELOG.md

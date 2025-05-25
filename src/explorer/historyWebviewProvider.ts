@@ -221,8 +221,12 @@ export class HistoryWebviewProvider {
       adds: 0,
       modifies: 0,
       deletes: 0,
+      forceResets: 0,
       files: 0,
       directories: 0,
+      localChanges: 0,
+      remoteChanges: 0,
+      syncedChanges: 0,
       lastActivity: entries.length > 0 ? entries[0].timestamp : null,
       firstActivity: entries.length > 0 ? entries[entries.length - 1].timestamp : null
     };
@@ -238,12 +242,31 @@ export class HistoryWebviewProvider {
         case OperationType.DELETE:
           stats.deletes++;
           break;
+        case OperationType.FORCE_CLEAR:
+          stats.forceResets++;
+          break;
       }
 
-      if (entry.fullPath.endsWith('/')) {
-        stats.directories++;
-      } else {
-        stats.files++;
+      // 统计数据源
+      switch (entry.source) {
+        case 'local':
+          stats.localChanges++;
+          break;
+        case 'remote':
+          stats.remoteChanges++;
+          break;
+        case 'synced':
+          stats.syncedChanges++;
+          break;
+      }
+
+      // 只对非强制重置操作统计文件/目录
+      if (entry.operation !== OperationType.FORCE_CLEAR) {
+        if (entry.fullPath.endsWith('/')) {
+          stats.directories++;
+        } else {
+          stats.files++;
+        }
       }
     });
 
@@ -433,6 +456,12 @@ export class HistoryWebviewProvider {
             color: white;
         }
 
+        .timeline-icon.force-reset {
+            background-color: var(--vscode-notificationsErrorIcon-foreground);
+            color: white;
+            font-weight: bold;
+        }
+
         .timeline-icon.unknown {
             background-color: var(--vscode-descriptionForeground);
             color: white;
@@ -494,6 +523,17 @@ export class HistoryWebviewProvider {
         .timeline-source.synced {
             background-color: var(--vscode-testing-iconPassed);
             color: white;
+        }
+
+        .timeline-device {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            background-color: var(--vscode-descriptionForeground);
+            color: var(--vscode-editor-background);
+            font-family: var(--vscode-editor-font-family);
         }
 
         .loading {
@@ -579,6 +619,22 @@ export class HistoryWebviewProvider {
                     <div id="deleteCount" class="stat-number">0</div>
                     <div class="stat-label">删除</div>
                 </div>
+                <div class="stat-card">
+                    <div id="forceResetCount" class="stat-number">0</div>
+                    <div class="stat-label">强制重置</div>
+                </div>
+                <div class="stat-card">
+                    <div id="localChanges" class="stat-number">0</div>
+                    <div class="stat-label">本地更改</div>
+                </div>
+                <div class="stat-card">
+                    <div id="remoteChanges" class="stat-number">0</div>
+                    <div class="stat-label">云端更改</div>
+                </div>
+                <div class="stat-card">
+                    <div id="syncedChanges" class="stat-number">0</div>
+                    <div class="stat-label">已同步</div>
+                </div>
             </div>
 
             <!-- 同步状态 -->
@@ -609,6 +665,7 @@ export class HistoryWebviewProvider {
                     <option value="+">新增</option>
                     <option value="~">修改</option>
                     <option value="-">删除</option>
+                    <option value="!">强制重置</option>
                 </select>
                 
                 <label>数据源:</label>
@@ -699,6 +756,32 @@ export class HistoryWebviewProvider {
                 const operationClass = getOperationClass(entry.operation);
                 const sourceClass = entry.source || 'synced';
                 
+                // 特殊处理强制重置操作
+                if (entry.operation === '!' || entry.operation === 'FORCE_CLEAR') {
+                    return \`
+                        <div class="timeline-item">
+                            <div class="timeline-icon \${operationClass}">
+                                \${operationIcon}
+                            </div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <div class="timeline-title">
+                                        🚨 \${getOperationText(entry.operation)}
+                                    </div>
+                                    <div class="timeline-time" title="\${timeStr}">
+                                        \${relativeTime}
+                                    </div>
+                                </div>
+                                <div class="timeline-path">系统重置操作 - 清空所有数据</div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div class="timeline-hash">设备: \${entry.deviceTag || '未知'}</div>
+                                    <span class="timeline-source \${sourceClass}">\${getSourceText(sourceClass)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    \`;
+                }
+                
                 const isDirectory = entry.fullPath.endsWith('/');
                 const itemType = isDirectory ? '📁' : '📄';
                 
@@ -719,7 +802,10 @@ export class HistoryWebviewProvider {
                             <div class="timeline-path">\${entry.fullPath}</div>
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div class="timeline-hash">\${entry.hash === '#' ? '目录操作' : '哈希: ' + entry.hash.substring(0, 8) + '...'}</div>
-                                <span class="timeline-source \${sourceClass}">\${getSourceText(sourceClass)}</span>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    \${entry.deviceTag ? \`<span class="timeline-device" title="设备标识">\${entry.deviceTag}</span>\` : ''}
+                                    <span class="timeline-source \${sourceClass}">\${getSourceText(sourceClass)}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -735,9 +821,11 @@ export class HistoryWebviewProvider {
                 case '+': return '+';
                 case '~': return '~';
                 case '-': return '−';
+                case '!': return '⚠';
                 case 'ADD': return '+';
                 case 'MODIFY': return '~';
                 case 'DELETE': return '−';
+                case 'FORCE_CLEAR': return '⚠';
                 default: return '?';
             }
         }
@@ -748,9 +836,11 @@ export class HistoryWebviewProvider {
                 case '+': return '新增';
                 case '~': return '修改';
                 case '-': return '删除';
+                case '!': return '强制重置';
                 case 'ADD': return '新增';
                 case 'MODIFY': return '修改';
                 case 'DELETE': return '删除';
+                case 'FORCE_CLEAR': return '强制重置';
                 default: return '未知';
             }
         }
@@ -764,6 +854,8 @@ export class HistoryWebviewProvider {
                 case 'MODIFY': return 'modify';
                 case '-':
                 case 'DELETE': return 'delete';
+                case '!':
+                case 'FORCE_CLEAR': return 'force-reset';
                 default: return 'unknown';
             }
         }
@@ -799,6 +891,10 @@ export class HistoryWebviewProvider {
             document.getElementById('addCount').textContent = stats.adds;
             document.getElementById('modifyCount').textContent = stats.modifies;
             document.getElementById('deleteCount').textContent = stats.deletes;
+            document.getElementById('forceResetCount').textContent = stats.forceResets;
+            document.getElementById('localChanges').textContent = stats.localChanges;
+            document.getElementById('remoteChanges').textContent = stats.remoteChanges;
+            document.getElementById('syncedChanges').textContent = stats.syncedChanges;
         }
 
         // 更新同步状态
