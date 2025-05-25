@@ -4,6 +4,7 @@ import { CloudSyncConfig, CloudSyncStatus } from '../models/types';
 export class SettingsManager {
   private static readonly CONFIG_KEY = 'starcode-snippets.cloudSync';
   private static readonly STATUS_KEY = 'starcode-snippets.cloudSyncStatus';
+  private static extensionContext: vscode.ExtensionContext | null = null;
 
   /**
    * 获取默认的云端同步配置
@@ -127,5 +128,19 @@ export class SettingsManager {
   static async resetConfig(): Promise<void> {
     await this.saveCloudSyncConfig(this.getDefaultConfig());
     await this.saveCloudSyncStatus(this.getDefaultStatus());
+  }
+
+  /**
+   * 设置扩展上下文
+   */
+  static setExtensionContext(context: vscode.ExtensionContext): void {
+    this.extensionContext = context;
+  }
+
+  /**
+   * 获取扩展上下文
+   */
+  static getExtensionContext(): vscode.ExtensionContext | null {
+    return this.extensionContext;
   }
 } 

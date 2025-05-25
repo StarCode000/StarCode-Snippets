@@ -143,6 +143,42 @@
         "title": "云端同步设置",
         "category": "StarCode Snippets",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "starcode-snippets.manualSync",
+        "title": "手动同步到云端",
+        "category": "StarCode Snippets",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "starcode-snippets.viewHistory",
+        "title": "查看同步历史",
+        "category": "StarCode Snippets",
+        "icon": "$(history)"
+      },
+      {
+        "command": "starcode-snippets.startAutoSync",
+        "title": "启动自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(play)"
+      },
+      {
+        "command": "starcode-snippets.stopAutoSync",
+        "title": "停止自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "starcode-snippets.restartAutoSync",
+        "title": "重启自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "starcode-snippets.autoSyncStatus",
+        "title": "查看自动同步状态",
+        "category": "StarCode Snippets",
+        "icon": "$(info)"
       }
     ],
     "menus": {
@@ -176,7 +212,6 @@
           "when": "view == copyCodeExplorer",
           "group": "navigation@3"
         },
-
         {
           "command": "starcode-snippets.createDirectory",
           "when": "view == copyCodeExplorer",
@@ -193,7 +228,7 @@
           "group": "navigation@6"
         },
         {
-          "command": "starcode-snippets.openSettings",
+          "command": "starcode-snippets.viewHistory",
           "when": "view == copyCodeExplorer",
           "group": "navigation@7"
         }
@@ -278,6 +313,16 @@
           "command": "starcode-snippets.exportSnippet",
           "when": "view == copyCodeExplorer && viewItem == snippet",
           "group": "5_export@1"
+        },
+        {
+          "command": "starcode-snippets.manualSync",
+          "when": "view == copyCodeExplorer && viewItem == syncStatus",
+          "group": "inline@1"
+        },
+        {
+          "command": "starcode-snippets.openSettings",
+          "when": "view == copyCodeExplorer && viewItem == syncStatus",
+          "group": "inline@2"
         }
       ]
     },

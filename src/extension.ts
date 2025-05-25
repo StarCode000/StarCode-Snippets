@@ -7,12 +7,20 @@ import { SnippetsTreeDataProvider } from './explorer/treeProvider';
 import { ImportExportManager } from './utils/importExport';
 import { SearchManager } from './utils/searchManager';
 import { SettingsWebviewProvider } from './explorer/settingsWebviewProvider';
+import { HistoryWebviewProvider } from './explorer/historyWebviewProvider';
+import { SettingsManager } from './utils/settingsManager';
+import { CloudSyncManager } from './utils/cloudSyncManager';
+import { AutoSyncManager } from './utils/autoSyncManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.time('starcode-snippets:activate');
   console.log('StarCode Snippets 扩展开始激活...');
   
   try {
+    // 初始化设置管理器
+    console.log('初始化设置管理器...');
+    SettingsManager.setExtensionContext(context);
+    
     // 创建存储管理器
     console.log('创建存储管理器...');
     const storageManager = new StorageManager(context);
@@ -21,9 +29,18 @@ export function activate(context: vscode.ExtensionContext): void {
     console.log('创建搜索管理器...');
     const searchManager = new SearchManager();
     
+    // 创建自动同步管理器
+    console.log('创建自动同步管理器...');
+    const autoSyncManager = new AutoSyncManager(context, storageManager);
+    
     // 创建树视图数据提供程序
     console.log('创建树视图数据提供程序...');
     const treeDataProvider = new SnippetsTreeDataProvider(storageManager, searchManager);
+    
+    // 设置自动同步管理器的刷新回调
+    autoSyncManager.setRefreshCallback(() => {
+      treeDataProvider.refresh();
+    });
     
     // 注册树视图
     console.log('注册树视图 copyCodeExplorer...');
@@ -65,10 +82,15 @@ export function activate(context: vscode.ExtensionContext): void {
         
         // 注册所有命令
         console.log('注册所有命令...');
-        const commands = registerCommands(context, storageManager, treeDataProvider, searchManager);
+        const commands = registerCommands(context, storageManager, treeDataProvider, searchManager, autoSyncManager);
         
         // 添加命令到订阅中
         context.subscriptions.push(...commands);
+        
+        // 添加自动同步管理器到订阅中，确保扩展停用时清理
+        context.subscriptions.push({
+          dispose: () => autoSyncManager.dispose()
+        });
         
         console.log('StarCode Snippets 扩展激活完成');
         console.timeEnd('starcode-snippets:activate');
@@ -89,7 +111,8 @@ function registerCommands(
   context: vscode.ExtensionContext, 
   storageManager: StorageManager, 
   treeDataProvider: SnippetsTreeDataProvider,
-  searchManager: SearchManager
+  searchManager: SearchManager,
+  autoSyncManager: AutoSyncManager
 ): vscode.Disposable[] {
   // 创建导入导出管理器
   const importExportManager = new ImportExportManager(storageManager);
@@ -286,7 +309,7 @@ function registerCommands(
           preview: true
         });
                 
-        vscode.window.showInformationMessage(`预览: ${snippet.name}`);
+        // vscode.window.showInformationMessage(`预览: ${snippet.name}`);
         
       } catch (error) {
         console.error('预览失败:', error);
@@ -602,6 +625,152 @@ function registerCommands(
     }
   );
 
+  // 注册查看历史记录命令
+  const viewHistory = vscode.commands.registerCommand(
+    'starcode-snippets.viewHistory',
+    async () => {
+      console.log('viewHistory 命令被调用');
+      try {
+        HistoryWebviewProvider.createOrShow(context.extensionUri);
+      } catch (error) {
+        console.error('viewHistory 命令执行失败:', error);
+        vscode.window.showErrorMessage(`查看历史记录失败: ${error}`);
+      }
+    }
+  );
+
+  // 注册手动同步命令
+  const manualSync = vscode.commands.registerCommand(
+    'starcode-snippets.manualSync',
+    async () => {
+      try {
+        // 检查是否正在编辑代码片段
+        const isEditing = await vscode.commands.executeCommand('getContext', 'starcode-snippets.isEditingSnippet') as boolean;
+        if (isEditing) {
+          vscode.window.showWarningMessage('用户正在编辑代码片段，请完成编辑后再进行同步', '我知道了');
+          return;
+        }
+        
+        const cloudSyncManager = new CloudSyncManager(context);
+        
+        if (!cloudSyncManager.isConfigured()) {
+          const action = await vscode.window.showWarningMessage(
+            '云端同步未配置，是否打开设置？',
+            '打开设置',
+            '取消'
+          );
+          if (action === '打开设置') {
+            vscode.commands.executeCommand('starcode-snippets.openSettings');
+          }
+          return;
+        }
+
+        // 使用进度条显示同步过程
+        await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "云端同步",
+          cancellable: false
+        }, async (progress) => {
+          progress.report({ increment: 0, message: "正在检查本地变更..." });
+          
+          const [snippets, directories] = await Promise.all([
+            storageManager.getAllSnippets(),
+            storageManager.getAllDirectories()
+          ]);
+
+          progress.report({ increment: 30, message: "正在与云端同步..." });
+          
+          const result = await cloudSyncManager.performSync(snippets, directories);
+          
+          progress.report({ increment: 100, message: "同步完成" });
+          
+          if (result.success) {
+            vscode.window.showInformationMessage(`✅ 同步成功: ${result.message}`);
+            refreshTreeView();
+          } else {
+            vscode.window.showErrorMessage(`❌ 同步失败: ${result.message}`);
+          }
+        });
+        
+      } catch (error) {
+        console.error('手动同步失败:', error);
+        vscode.window.showErrorMessage(`❌ 手动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+  );
+
+  // 注册自动同步控制命令
+  const startAutoSync = vscode.commands.registerCommand(
+    'starcode-snippets.startAutoSync',
+    async () => {
+      try {
+        autoSyncManager.start();
+        vscode.window.showInformationMessage('🔄 自动同步已启动');
+      } catch (error) {
+        console.error('启动自动同步失败:', error);
+        vscode.window.showErrorMessage(`启动自动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+  );
+
+  const stopAutoSync = vscode.commands.registerCommand(
+    'starcode-snippets.stopAutoSync',
+    async () => {
+      try {
+        autoSyncManager.stop();
+        vscode.window.showInformationMessage('⏹️ 自动同步已停止');
+      } catch (error) {
+        console.error('停止自动同步失败:', error);
+        vscode.window.showErrorMessage(`停止自动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+  );
+
+  const restartAutoSync = vscode.commands.registerCommand(
+    'starcode-snippets.restartAutoSync',
+    async () => {
+      try {
+        autoSyncManager.restart();
+        vscode.window.showInformationMessage('🔄 自动同步已重启');
+      } catch (error) {
+        console.error('重启自动同步失败:', error);
+        vscode.window.showErrorMessage(`重启自动同步失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+  );
+
+  const autoSyncStatus = vscode.commands.registerCommand(
+    'starcode-snippets.autoSyncStatus',
+    async () => {
+      try {
+        const status = autoSyncManager.getStatus();
+        const config = SettingsManager.getCloudSyncConfig();
+        
+        let message = `自动同步状态: ${status.isRunning ? '运行中' : '已停止'}\n`;
+        message += `配置状态: ${config.autoSync ? '已启用' : '已禁用'}\n`;
+        message += `同步间隔: ${status.intervalSeconds}秒\n`;
+        
+        if (status.isRunning && status.nextSyncTime) {
+          message += `下次同步: ${status.nextSyncTime.toLocaleString()}`;
+        }
+        
+        vscode.window.showInformationMessage(message);
+      } catch (error) {
+        console.error('获取自动同步状态失败:', error);
+        vscode.window.showErrorMessage(`获取状态失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+  );
+
+  // 启动时检查是否需要启动自动同步
+  setTimeout(() => {
+    const config = SettingsManager.getCloudSyncConfig();
+    if (config.autoSync) {
+      console.log('配置中启用了自动同步，正在启动...');
+      autoSyncManager.start();
+    }
+  }, 2000); // 延迟2秒启动，确保扩展完全初始化
+
   // 返回所有注册的命令
   return [
     saveToLibrary,
@@ -620,7 +789,13 @@ function registerCommands(
     searchSnippets,
     clearSearch,
     toggleSearchMode,
-    openSettings
+    openSettings,
+    viewHistory,
+    manualSync,
+    startAutoSync,
+    stopAutoSync,
+    restartAutoSync,
+    autoSyncStatus
   ];
 }
 

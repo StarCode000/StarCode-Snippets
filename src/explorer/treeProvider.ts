@@ -2,6 +2,7 @@ import * as vscode from 'vscode'
 import { StorageManager } from '../storage/storageManager'
 import { CodeSnippet, Directory } from '../models/types'
 import { SearchManager } from '../utils/searchManager'
+import { SettingsManager } from '../utils/settingsManager'
 
 export class SnippetTreeItem extends vscode.TreeItem {
   constructor(
@@ -114,6 +115,59 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     if (!element) {
       // 根节点 - 显示所有顶级目录和代码片段
       const rootItems: SnippetTreeItem[] = []
+
+      // 显示云端同步状态
+      const syncStatus = SettingsManager.getCloudSyncStatus()
+      const syncConfig = SettingsManager.getCloudSyncConfig()
+      
+      if (syncConfig.endpoint) {
+        let statusText = ''
+        let statusIcon = ''
+        
+        if (syncStatus.isSyncing) {
+          statusText = '☁️ 正在同步...'
+          statusIcon = 'sync~spin'
+        } else if (syncStatus.isConnected) {
+          if (syncStatus.lastSyncTime) {
+            const lastSync = new Date(syncStatus.lastSyncTime)
+            const now = new Date()
+            const diffMinutes = Math.floor((now.getTime() - lastSync.getTime()) / (1000 * 60))
+            
+            if (diffMinutes < 1) {
+              statusText = '☁️ 刚刚同步'
+            } else if (diffMinutes < 60) {
+              statusText = `☁️ ${diffMinutes}分钟前同步`
+            } else {
+              const diffHours = Math.floor(diffMinutes / 60)
+              statusText = `☁️ ${diffHours}小时前同步`
+            }
+          } else {
+            statusText = '☁️ 已连接，未同步'
+          }
+          statusIcon = 'cloud'
+        } else {
+          statusText = '☁️ 未连接'
+          statusIcon = 'cloud-offline'
+        }
+        
+        if (syncStatus.lastError) {
+          statusText += ` (${syncStatus.lastError})`
+          statusIcon = 'warning'
+        }
+        
+        const syncStatusItem = new SnippetTreeItem(
+          statusText,
+          vscode.TreeItemCollapsibleState.None
+        )
+        syncStatusItem.contextValue = 'syncStatus'
+        syncStatusItem.iconPath = new vscode.ThemeIcon(statusIcon)
+        syncStatusItem.tooltip = `点击打开云端同步设置\n\n配置: ${syncConfig.endpoint}\n状态: ${syncStatus.isConnected ? '已连接' : '未连接'}`
+        syncStatusItem.command = {
+          command: 'starcode-snippets.openSettings',
+          title: '打开云端同步设置'
+        }
+        rootItems.push(syncStatusItem)
+      }
 
       // 如果有搜索，显示搜索状态
       if (this._searchManager.isActive) {
