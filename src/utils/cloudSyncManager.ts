@@ -184,6 +184,8 @@ export class CloudSyncManager {
     }
     
     try {
+      console.log(`尝试下载S3文件: ${key}`);
+      
       const command = new GetObjectCommand({
         Bucket: this.config.bucket,
         Key: key,
@@ -208,14 +210,20 @@ export class CloudSyncManager {
           offset += chunk.length;
         }
         
-        return new TextDecoder().decode(buffer);
+        const content = new TextDecoder('utf-8').decode(buffer);
+        console.log(`成功下载S3文件: ${key}, 内容长度: ${content.length}`);
+        return content;
       }
       
+      console.warn(`S3文件响应体为空: ${key}`);
       return null;
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+        console.log(`S3文件不存在: ${key}`);
         return null; // 文件不存在
       }
+      console.error(`下载S3文件失败: ${key}`, error);
+      console.error(`错误详情: 名称=${error.name}, 状态码=${error.$metadata?.httpStatusCode}, 消息=${error.message}`);
       throw error;
     }
   }
@@ -905,8 +913,106 @@ export class CloudSyncManager {
     // 找出远端有但本地没有的条目
     const newEntries = remoteEntries.filter(entry => !localTimestamps.has(entry.timestamp));
     
-    // 按时间戳排序，确保按正确顺序应用变更
-    return newEntries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    // 先按时间戳排序，确保基本的时间顺序
+    const sortedByTime = newEntries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    
+    // 然后重新排序以确保操作的逻辑顺序：
+    // 1. 先处理所有目录添加（按层级顺序）
+    // 2. 再处理所有文件添加和修改
+    // 3. 最后处理所有删除（先删文件，再删目录，按层级倒序）
+    return this.reorderEntriesForLogicalSequence(sortedByTime);
+  }
+
+  /**
+   * 重新排序条目以确保逻辑操作顺序
+   */
+  private reorderEntriesForLogicalSequence(entries: HistoryEntry[]): HistoryEntry[] {
+    const result: HistoryEntry[] = [];
+    
+    // 按操作类型分组
+    const addDirEntries: HistoryEntry[] = [];
+    const addFileEntries: HistoryEntry[] = [];
+    const modifyEntries: HistoryEntry[] = [];
+    const deleteFileEntries: HistoryEntry[] = [];
+    const deleteDirEntries: HistoryEntry[] = [];
+    const otherEntries: HistoryEntry[] = [];
+    
+    for (const entry of entries) {
+      switch (entry.operation) {
+        case OperationType.ADD:
+          if (entry.fullPath.endsWith('/')) {
+            addDirEntries.push(entry);
+          } else {
+            addFileEntries.push(entry);
+          }
+          break;
+        case OperationType.MODIFY:
+          modifyEntries.push(entry);
+          break;
+        case OperationType.DELETE:
+          if (entry.fullPath.endsWith('/')) {
+            deleteDirEntries.push(entry);
+          } else {
+            deleteFileEntries.push(entry);
+          }
+          break;
+        default:
+          otherEntries.push(entry);
+          break;
+      }
+    }
+    
+    // 1. 添加目录（按层级顺序：浅层目录先创建）
+    const sortedAddDirs = addDirEntries.sort((a, b) => {
+      const aDepth = (a.fullPath.match(/\//g) || []).length;
+      const bDepth = (b.fullPath.match(/\//g) || []).length;
+      if (aDepth !== bDepth) {
+        return aDepth - bDepth;
+      }
+      // 同层级按时间戳排序
+      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    });
+    result.push(...sortedAddDirs);
+    
+    // 2. 添加文件（按时间戳排序）
+    const sortedAddFiles = addFileEntries.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    result.push(...sortedAddFiles);
+    
+    // 3. 修改操作（按时间戳排序）
+    const sortedModify = modifyEntries.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    result.push(...sortedModify);
+    
+    // 4. 删除文件（按时间戳排序）
+    const sortedDeleteFiles = deleteFileEntries.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    result.push(...sortedDeleteFiles);
+    
+    // 5. 删除目录（按层级倒序：深层目录先删除）
+    const sortedDeleteDirs = deleteDirEntries.sort((a, b) => {
+      const aDepth = (a.fullPath.match(/\//g) || []).length;
+      const bDepth = (b.fullPath.match(/\//g) || []).length;
+      if (aDepth !== bDepth) {
+        return bDepth - aDepth; // 深层先删除
+      }
+      // 同层级按时间戳排序
+      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    });
+    result.push(...sortedDeleteDirs);
+    
+    // 6. 其他操作（如强制清空等）
+    const sortedOthers = otherEntries.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    result.push(...sortedOthers);
+    
+    console.log(`重新排序完成: ${entries.length} 个条目 -> 目录添加:${sortedAddDirs.length}, 文件添加:${sortedAddFiles.length}, 修改:${sortedModify.length}, 文件删除:${sortedDeleteFiles.length}, 目录删除:${sortedDeleteDirs.length}, 其他:${sortedOthers.length}`);
+    
+    return result;
   }
   
   /**
@@ -953,22 +1059,23 @@ export class CloudSyncManager {
       return; // 删除操作在 applyRemoteEntry 中处理
     }
     
-    // 从路径解析目录信息
-    const directory = this.parseDirectoryFromPath(entry.fullPath);
-    
     if (entry.operation === OperationType.ADD) {
-      // 检查目录是否已存在
+      // 检查目录是否已存在（按路径检查）
       const existingDirs = await this.storageManager.getAllDirectories();
-      const exists = existingDirs.some((d: Directory) => d.id === directory.id);
+      const exists = existingDirs.some((d: Directory) => {
+        const existingPath = ChangelogManager.generateFullPath(d, existingDirs);
+        return existingPath === entry.fullPath;
+      });
       
       if (!exists) {
-        await this.storageManager.createDirectory(directory);
-        console.log(`创建目录: ${directory.name}`);
+        // 需要从即将导入的代码片段中推断正确的目录ID
+        await this.createDirectoryFromPath(entry.fullPath);
       } else {
-        console.log(`目录已存在，跳过创建: ${directory.name}`);
+        console.log(`目录已存在，跳过创建: ${entry.fullPath}`);
       }
     } else if (entry.operation === OperationType.MODIFY) {
       // 目录修改（通常是重命名）
+      const directory = this.parseDirectoryFromPath(entry.fullPath);
       await this.storageManager.updateDirectory(directory);
       console.log(`更新目录: ${directory.name}`);
     }
@@ -982,32 +1089,55 @@ export class CloudSyncManager {
       return; // 删除操作在 applyRemoteEntry 中处理
     }
     
-    // 从云端下载文件内容
-    const s3Key = this.generateSnippetKey(entry.fullPath);
-    const fileContent = await this.downloadFile(s3Key);
-    
-    if (!fileContent) {
-      throw new Error(`无法从云端下载文件: ${entry.fullPath}`);
-    }
-    
-    // 解析代码片段
-    const snippet = this.jsonToSnippet(fileContent);
-    
-    if (entry.operation === OperationType.ADD) {
-      // 检查代码片段是否已存在
-      const existingSnippets = await this.storageManager.getAllSnippets();
-      const exists = existingSnippets.some((s: CodeSnippet) => s.id === snippet.id);
+    try {
+      console.log(`开始应用文件变更: ${entry.operation} ${entry.fullPath}`);
       
-      if (!exists) {
-        await this.storageManager.saveSnippet(snippet);
-        console.log(`创建代码片段: ${snippet.name}`);
-          } else {
-        console.log(`代码片段已存在，跳过创建: ${snippet.name}`);
+      // 从云端下载文件内容
+      const s3Key = this.generateSnippetKey(entry.fullPath);
+      console.log(`生成的S3键名: ${s3Key}`);
+      
+      const fileContent = await this.downloadFile(s3Key);
+      
+      if (!fileContent) {
+        console.error(`从云端下载文件失败: ${entry.fullPath} -> ${s3Key}`);
+        throw new Error(`无法从云端下载文件: ${entry.fullPath} (S3键: ${s3Key})`);
       }
-    } else if (entry.operation === OperationType.MODIFY) {
-      // 更新代码片段
-      await this.storageManager.updateSnippet(snippet);
-      console.log(`更新代码片段: ${snippet.name}`);
+      
+      console.log(`成功下载文件内容，长度: ${fileContent.length} 字符`);
+      
+      // 解析代码片段
+      let snippet: CodeSnippet;
+      try {
+        snippet = this.jsonToSnippet(fileContent);
+        console.log(`成功解析代码片段: ${snippet.name} (ID: ${snippet.id})`);
+      } catch (parseError) {
+        console.error(`解析代码片段JSON失败:`, parseError);
+        console.error(`文件内容预览:`, fileContent.substring(0, 200));
+        throw new Error(`解析代码片段JSON失败: ${entry.fullPath}`);
+      }
+      
+      if (entry.operation === OperationType.ADD) {
+        // 检查代码片段是否已存在
+        const existingSnippets = await this.storageManager.getAllSnippets();
+        const exists = existingSnippets.some((s: CodeSnippet) => s.id === snippet.id);
+        
+        if (!exists) {
+          console.log(`准备保存新代码片段: ${snippet.name}`);
+          await this.storageManager.saveSnippet(snippet);
+          console.log(`✅ 成功创建代码片段: ${snippet.name}`);
+        } else {
+          console.log(`代码片段已存在，跳过创建: ${snippet.name}`);
+        }
+      } else if (entry.operation === OperationType.MODIFY) {
+        // 更新代码片段
+        console.log(`准备更新代码片段: ${snippet.name}`);
+        await this.storageManager.updateSnippet(snippet);
+        console.log(`✅ 成功更新代码片段: ${snippet.name}`);
+      }
+      
+    } catch (error) {
+      console.error(`应用文件变更失败 [${entry.operation} ${entry.fullPath}]:`, error);
+      throw error;
     }
   }
   
@@ -1055,6 +1185,166 @@ export class CloudSyncManager {
   }
   
   /**
+   * 确保代码片段的父目录存在
+   */
+  private async ensureParentDirectoryExists(snippet: CodeSnippet, snippetPath: string): Promise<void> {
+    if (!snippet.parentId) {
+      return; // 根级别代码片段，无需父目录
+    }
+    
+    const existingDirs = await this.storageManager.getAllDirectories();
+    const parentDir = existingDirs.find((d: Directory) => d.id === snippet.parentId);
+    
+    if (parentDir) {
+      console.log(`父目录已存在: ${parentDir.name} (ID: ${parentDir.id})`);
+      return; // 父目录已存在
+    }
+    
+    // 父目录不存在，需要从路径推断并创建
+    console.log(`父目录不存在 (ID: ${snippet.parentId})，从路径推断: ${snippetPath}`);
+    
+    // 从代码片段路径推断目录路径
+    const pathParts = snippetPath.replace(/^\/+|\/+$/g, '').split('/');
+    if (pathParts.length > 1) {
+      // 移除文件名，保留目录路径
+      const dirPath = '/' + pathParts.slice(0, -1).join('/') + '/';
+      
+      // 创建目录，使用代码片段中的parentId
+      const directory: Directory = {
+        id: snippet.parentId,
+        name: pathParts[pathParts.length - 2], // 目录名
+        parentId: null, // 暂时设为根级别，后续可以优化支持多级目录
+        order: 0
+      };
+      
+      await this.storageManager.createDirectory(directory);
+      console.log(`根据代码片段创建父目录: ${directory.name} (ID: ${directory.id})`);
+    }
+  }
+
+  /**
+   * 从路径创建目录（智能推断正确的ID）
+   */
+  private async createDirectoryFromPath(fullPath: string): Promise<void> {
+    // 从路径解析基本目录信息
+    const cleanPath = fullPath.replace(/^\/+|\/+$/g, '');
+    const pathParts = cleanPath.split('/');
+    const dirName = pathParts[pathParts.length - 1];
+    
+    // 先尝试从即将导入的代码片段中找到正确的parentId
+    // 这是一个临时解决方案，我们使用路径哈希作为ID
+    const directoryId = crypto.createHash('md5').update(fullPath).digest('hex');
+    
+    const directory: Directory = {
+      id: directoryId,
+      name: dirName,
+      parentId: null, // 暂时设为根级别
+      order: 0
+    };
+    
+    await this.storageManager.createDirectory(directory);
+    console.log(`创建目录: ${directory.name} (ID: ${directory.id})`);
+  }
+
+  /**
+   * 基于代码片段路径创建完整的目录结构
+   */
+  private async createDirectoryStructureFromPaths(snippetPaths: string[]): Promise<void> {
+    if (!this.storageManager) {
+      throw new Error('StorageManager 未初始化');
+    }
+
+    console.log('基于路径创建目录结构...');
+
+    // 收集所有需要的目录路径
+    const directoriesSet = new Set<string>();
+    
+    for (const snippetPath of snippetPaths) {
+      const cleanPath = snippetPath.replace(/^\/+|\/+$/g, '');
+      const pathParts = cleanPath.split('/');
+      
+      // 为每个层级创建目录路径
+      for (let i = 1; i < pathParts.length; i++) {
+        const dirPath = '/' + pathParts.slice(0, i).join('/') + '/';
+        directoriesSet.add(dirPath);
+      }
+    }
+
+    // 按层级深度排序，确保父目录先创建
+    const sortedDirPaths = Array.from(directoriesSet).sort((a, b) => {
+      const aDepth = (a.match(/\//g) || []).length;
+      const bDepth = (b.match(/\//g) || []).length;
+      return aDepth - bDepth;
+    });
+
+    console.log(`需要创建 ${sortedDirPaths.length} 个目录:`, sortedDirPaths);
+
+    // 获取现有目录
+    const existingDirs = await this.storageManager.getAllDirectories();
+    
+    // 逐个创建目录
+    for (const dirPath of sortedDirPaths) {
+      try {
+        // 检查目录是否已存在
+        const exists = existingDirs.some((d: Directory) => {
+          const existingPath = ChangelogManager.generateFullPath(d, existingDirs);
+          return existingPath === dirPath;
+        });
+
+        if (!exists) {
+          await this.createDirectoryFromPath(dirPath);
+        } else {
+          console.log(`目录已存在，跳过: ${dirPath}`);
+        }
+      } catch (error) {
+        console.error(`创建目录失败 ${dirPath}:`, error);
+        // 继续创建其他目录
+      }
+    }
+
+    console.log('目录结构创建完成');
+  }
+
+  /**
+   * 修正代码片段的parentId以匹配创建的目录
+   */
+  private correctSnippetParentId(snippetData: any, fullPath: string, directories: Directory[]): any {
+    // 从路径推断父目录
+    const cleanPath = fullPath.replace(/^\/+|\/+$/g, '');
+    const pathParts = cleanPath.split('/');
+    
+    if (pathParts.length <= 1) {
+      // 根级别代码片段
+      return {
+        ...snippetData,
+        parentId: null
+      };
+    }
+
+    // 构建父目录路径
+    const parentPath = '/' + pathParts.slice(0, -1).join('/') + '/';
+    
+    // 查找匹配的目录
+    for (const dir of directories) {
+      const dirPath = ChangelogManager.generateFullPath(dir, directories);
+      if (dirPath === parentPath) {
+        console.log(`修正parentId: ${snippetData.name} -> 目录: ${dir.name} (${dir.id})`);
+        return {
+          ...snippetData,
+          parentId: dir.id
+        };
+      }
+    }
+
+    // 如果找不到匹配的目录，设为根级别
+    console.warn(`未找到匹配的父目录 ${parentPath}，设为根级别: ${snippetData.name}`);
+    return {
+      ...snippetData,
+      parentId: null
+    };
+  }
+
+  /**
    * 从路径解析目录信息
    */
   private parseDirectoryFromPath(fullPath: string): Directory {
@@ -1079,6 +1369,160 @@ export class CloudSyncManager {
       parentId: parentId,
       order: 0
     };
+  }
+
+  /**
+   * 放弃本地代码库，完全从云端导入
+   * 清空本地所有代码片段和目录，然后从云端重新导入
+   */
+  public async abandonLocalAndImportFromCloud(): Promise<SyncResult> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: '云端同步未配置'
+      };
+    }
+
+    if (!this.storageManager) {
+      return {
+        success: false,
+        message: 'StorageManager 未初始化'
+      };
+    }
+
+    try {
+      console.log('开始放弃本地代码库并从云端导入...');
+
+      // 1. 检查云端是否有数据
+      const remoteCheck = await this.checkRemoteUpdates();
+      
+      // 如果云端没有历史记录文件，说明云端确实没有数据
+      if (!remoteCheck.remoteHistory && !remoteCheck.hasUpdates) {
+        // 尝试直接下载历史记录文件来确认
+        const remoteHistoryDirect = await this.downloadFile(this.HISTORY_FILE_KEY);
+        if (!remoteHistoryDirect || !remoteHistoryDirect.trim()) {
+          return {
+            success: false,
+            message: '云端没有可导入的数据'
+          };
+        }
+        // 如果直接下载成功，使用这个历史记录
+        remoteCheck.remoteHistory = remoteHistoryDirect;
+      }
+
+      // 2. 清空本地代码库
+      console.log('清空本地代码库...');
+      await this.clearLocalCodebase();
+
+      // 3. 清空本地历史记录
+      console.log('清空本地历史记录...');
+      await this.saveLocalSyncHistory('');
+      if (this.context) {
+        await this.context.globalState.update('cloudSync.lastMetadata', null);
+      }
+
+      // 4. 从云端重新导入所有数据
+      console.log('从云端重新导入数据...');
+      const remoteHistory = remoteCheck.remoteHistory || '';
+      const importResult = await this.importFromRemoteAfterReset(remoteHistory);
+
+      // 5. 更新本地同步状态
+      await this.saveLocalSyncHistory(remoteHistory);
+      if (remoteCheck.remoteMetadata) {
+        await this.saveLocalSyncMetadata(remoteCheck.remoteMetadata);
+      }
+
+      // 6. 更新同步状态
+      const status = SettingsManager.getCloudSyncStatus();
+      status.lastSyncTime = Date.now();
+      status.lastError = null;
+      await SettingsManager.saveCloudSyncStatus(status);
+
+      return {
+        success: true,
+        message: `成功从云端导入 ${importResult.importedCount} 个代码片段，本地代码库已完全替换`
+      };
+
+    } catch (error) {
+      console.error('从云端导入失败:', error);
+      return {
+        success: false,
+        message: `从云端导入失败: ${error instanceof Error ? error.message : '未知错误'}`
+      };
+    }
+  }
+
+  /**
+   * 调试方法：验证历史记录中的文件是否在S3中存在
+   */
+  public async debugVerifyRemoteFiles(remoteHistory: string): Promise<{ 
+    totalFiles: number; 
+    existingFiles: string[]; 
+    missingFiles: string[]; 
+    errors: string[] 
+  }> {
+    if (!this.isConfigured()) {
+      throw new Error('云端同步未配置');
+    }
+
+    const result = {
+      totalFiles: 0,
+      existingFiles: [] as string[],
+      missingFiles: [] as string[],
+      errors: [] as string[]
+    };
+
+    try {
+      const remoteEntries = ChangelogManager.parseHistory(remoteHistory);
+      
+      // 过滤出文件条目（非目录，非强制清空）
+      const fileEntries = remoteEntries.filter(entry => 
+        entry.operation !== OperationType.FORCE_CLEAR &&
+        entry.operation !== OperationType.DELETE &&
+        !entry.fullPath.endsWith('/')
+      );
+
+      result.totalFiles = fileEntries.length;
+      console.log(`开始验证 ${result.totalFiles} 个文件...`);
+
+      for (const entry of fileEntries) {
+        try {
+          const s3Key = this.generateSnippetKey(entry.fullPath);
+          console.log(`检查文件: ${entry.fullPath} -> ${s3Key}`);
+          
+          const exists = await this.fileExists(s3Key);
+          
+          if (exists) {
+            result.existingFiles.push(entry.fullPath);
+            console.log(`✅ 文件存在: ${entry.fullPath}`);
+          } else {
+            result.missingFiles.push(entry.fullPath);
+            console.log(`❌ 文件缺失: ${entry.fullPath}`);
+          }
+        } catch (error) {
+          const errorMsg = `检查文件失败 ${entry.fullPath}: ${error instanceof Error ? error.message : '未知错误'}`;
+          result.errors.push(errorMsg);
+          console.error(errorMsg);
+        }
+      }
+
+      console.log(`验证完成: ${result.existingFiles.length}/${result.totalFiles} 个文件存在`);
+      
+      if (result.missingFiles.length > 0) {
+        console.warn('缺失的文件:', result.missingFiles);
+      }
+      
+      if (result.errors.length > 0) {
+        console.error('验证过程中的错误:', result.errors);
+      }
+
+    } catch (error) {
+      const errorMsg = `验证远程文件失败: ${error instanceof Error ? error.message : '未知错误'}`;
+      result.errors.push(errorMsg);
+      console.error(errorMsg);
+    }
+
+    return result;
   }
 
   /**
@@ -1353,6 +1797,7 @@ export class CloudSyncManager {
 
   /**
    * 从云端重新导入数据（在强制清空后）
+   * 使用基于路径的方法，不依赖ID和parentId
    */
   private async importFromRemoteAfterReset(remoteHistory: string): Promise<{ importedCount: number }> {
     if (!this.storageManager) {
@@ -1363,31 +1808,92 @@ export class CloudSyncManager {
 
     try {
       const remoteEntries = ChangelogManager.parseHistory(remoteHistory);
-      let importedCount = 0;
-
-      // 按时间顺序处理所有条目（跳过强制清空记录）
-      for (const entry of remoteEntries) {
-        if (entry.operation === OperationType.FORCE_CLEAR) {
-          continue; // 跳过强制清空记录
-        }
-
-        if (entry.operation === OperationType.DELETE) {
-          continue; // 在重新导入时跳过删除操作
-        }
-
+      
+      // 过滤掉强制清空记录和删除操作
+      const validEntries = remoteEntries.filter(entry => 
+        entry.operation !== OperationType.FORCE_CLEAR && 
+        entry.operation !== OperationType.DELETE
+      );
+      
+      // 分离目录和文件条目
+      const directoryEntries = validEntries.filter(entry => entry.fullPath.endsWith('/'));
+      const fileEntries = validEntries.filter(entry => !entry.fullPath.endsWith('/'));
+      
+      console.log(`发现 ${directoryEntries.length} 个目录条目和 ${fileEntries.length} 个文件条目`);
+      
+      // 第一步：先下载所有代码片段，分析其路径结构
+      const snippetDataMap = new Map<string, any>();
+      for (const entry of fileEntries) {
         try {
-          if (entry.fullPath.endsWith('/')) {
-            // 目录操作
-            await this.applyDirectoryEntry(entry);
-          } else {
-            // 文件操作
-            await this.applyFileEntry(entry);
-            importedCount++;
+          const s3Key = this.generateSnippetKey(entry.fullPath);
+          const fileContent = await this.downloadFile(s3Key);
+          if (fileContent) {
+            const snippetData = this.jsonToSnippet(fileContent);
+            snippetDataMap.set(entry.fullPath, snippetData);
           }
         } catch (error) {
-          console.warn(`导入条目失败 [${entry.operation} ${entry.fullPath}]:`, error);
-          // 继续处理其他条目，不中断整个导入过程
+          console.error(`下载代码片段失败 ${entry.fullPath}:`, error);
         }
+      }
+      
+      // 第二步：基于代码片段路径创建目录结构
+      await this.createDirectoryStructureFromPaths(Array.from(snippetDataMap.keys()));
+      
+      // 第三步：获取创建的目录信息，用于修正parentId
+      const createdDirectories = await this.storageManager.getAllDirectories();
+      
+      // 第四步：保存所有代码片段，修正parentId
+      let importedCount = 0;
+      const errors: string[] = [];
+      
+      for (const [fullPath, snippetData] of snippetDataMap) {
+        try {
+          console.log(`保存代码片段: ${snippetData.name} -> ${fullPath} (原始parentId: ${snippetData.parentId})`);
+          
+          // 修正parentId以匹配我们创建的目录
+          const correctedSnippet = this.correctSnippetParentId(snippetData, fullPath, createdDirectories);
+          console.log(`修正后的parentId: ${correctedSnippet.parentId}`);
+          
+          // 检查是否已存在
+          const existingSnippets = await this.storageManager.getAllSnippets();
+          const exists = existingSnippets.some((s: any) => s.id === correctedSnippet.id);
+          
+          if (!exists) {
+            await this.storageManager.saveSnippet(correctedSnippet);
+            importedCount++;
+            console.log(`✅ 成功保存代码片段: ${correctedSnippet.name} (最终parentId: ${correctedSnippet.parentId})`);
+          } else {
+            // 即使已存在，也要更新parentId
+            console.log(`代码片段已存在，更新parentId: ${correctedSnippet.name}`);
+            
+            // 强制更新代码片段的parentId
+            const existingSnippet = existingSnippets.find((s: any) => s.id === correctedSnippet.id);
+            if (existingSnippet && existingSnippet.parentId !== correctedSnippet.parentId) {
+              console.log(`强制更新parentId: ${existingSnippet.parentId} -> ${correctedSnippet.parentId}`);
+              // 确保使用现有的其他字段，只更新parentId
+              const updatedSnippet = {
+                ...existingSnippet,
+                parentId: correctedSnippet.parentId
+              };
+              await this.storageManager.updateSnippet(updatedSnippet);
+              await this.storageManager.clearCache(); // 清除缓存确保更新生效
+              console.log(`✅ 成功强制更新代码片段: ${updatedSnippet.name} (最终parentId: ${updatedSnippet.parentId})`);
+            } else {
+              await this.storageManager.updateSnippet(correctedSnippet);
+              console.log(`✅ 成功更新代码片段: ${correctedSnippet.name} (最终parentId: ${correctedSnippet.parentId})`);
+            }
+          }
+        } catch (error) {
+          const errorMsg = `保存代码片段失败 ${fullPath}: ${error instanceof Error ? error.message : '未知错误'}`;
+          console.error(errorMsg, error);
+          errors.push(errorMsg);
+        }
+      }
+      
+      // 如果有错误，在日志中报告
+      if (errors.length > 0) {
+        console.warn(`导入过程中发生 ${errors.length} 个错误:`);
+        errors.forEach(error => console.warn(`  - ${error}`));
       }
 
       console.log(`从云端重新导入完成，共导入 ${importedCount} 个代码片段`);

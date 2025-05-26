@@ -63,8 +63,8 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       this.refresh()
     })
 
-    // 启动状态更新定时器（每0.5秒更新一次）
-    this._startStatusUpdateTimer()
+    // 启动状态更新定时器（每5秒更新一次）
+    this._startStatusUpdateTimer() // 暂时禁用定时器避免干扰调试
 
     // 立即加载数据
     this._loadData()
@@ -95,7 +95,7 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     this._statusUpdateTimer = setInterval(() => {
       // 只刷新根节点的状态显示，不重新加载数据
       this._onDidChangeTreeData.fire()
-    }, 500)
+    }, 5000)
   }
 
   /**
@@ -116,8 +116,13 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   }
 
   refresh(): void {
+    console.log('TreeDataProvider.refresh() 被调用')
     this._loadData().then(() => {
+      console.log('TreeDataProvider 数据加载完成，触发UI更新')
       this._onDidChangeTreeData.fire()
+    }).catch(error => {
+      console.error('TreeDataProvider 刷新失败:', error)
+      this._onDidChangeTreeData.fire() // 即使失败也触发更新
     })
   }
 
@@ -155,7 +160,10 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       this._directories = directories
       this._snippets = snippets
 
-      console.log(`加载了 ${this._directories.length} 个目录和 ${this._snippets.length} 个代码片段`)
+      console.log(`TreeDataProvider加载了 ${this._directories.length} 个目录和 ${this._snippets.length} 个代码片段`)
+      if (this._snippets.length > 0) {
+        console.log('代码片段详情:', JSON.stringify(this._snippets.map(s => ({ id: s.id, name: s.name, parentId: s.parentId })), null, 2))
+      }
     } catch (error) {
       console.error('加载数据失败:', error)
       vscode.window.showErrorMessage(`加载代码片段失败: ${error}`)
@@ -167,9 +175,11 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   }
 
   async getChildren(element?: SnippetTreeItem): Promise<SnippetTreeItem[]> {
+    console.log(`TreeDataProvider.getChildren() 被调用, element: ${element ? (element.directory ? `目录:${element.directory.name}` : element.snippet ? `代码片段:${element.snippet.name}` : '其他') : '根节点'}`)
     
     // 如果数据还没加载完成，先等待数据加载
     if (!this._initialized) {
+      console.log('TreeDataProvider 未初始化，开始加载数据...')
       try {
         await this._loadData()
         this._initialized = true
@@ -179,9 +189,13 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       }
     }
 
+    console.log(`TreeDataProvider 当前数据: ${this._directories.length} 个目录, ${this._snippets.length} 个代码片段`)
+
     // 应用搜索过滤
     const filteredSnippets = this._searchManager.filterSnippets(this._snippets)
     const filteredDirectories = this._searchManager.filterDirectories(this._directories, filteredSnippets)
+    
+    console.log(`过滤后数据: ${filteredDirectories.length} 个目录, ${filteredSnippets.length} 个代码片段`)
 
     if (!element) {
       // 根节点 - 显示所有顶级目录和代码片段
@@ -264,6 +278,12 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
 
       // 添加根级别的代码片段
       const rootSnippets = filteredSnippets.filter((s) => s.parentId === null)
+      console.log(`根级别代码片段数量: ${rootSnippets.length}`)
+      console.log('所有代码片段的parentId分布:', JSON.stringify(filteredSnippets.map(s => ({ name: s.name, parentId: s.parentId })), null, 2))
+      if (rootSnippets.length > 0) {
+        console.log('根级别代码片段:', JSON.stringify(rootSnippets.map(s => ({ name: s.name, parentId: s.parentId })), null, 2))
+      }
+      
       rootSnippets
         .sort((a, b) => a.order - b.order)
         .forEach((snippet) => {
@@ -282,8 +302,10 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
           )
 
           rootItems.push(item)
+          console.log(`添加根级别代码片段到UI: ${snippet.name}`)
         })
 
+      console.log(`返回根节点项目总数: ${rootItems.length}`)
       return rootItems
     } else if (element.directory) {
       // 目录节点 - 显示该目录下的所有子目录和代码片段

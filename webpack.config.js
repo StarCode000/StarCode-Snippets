@@ -47,67 +47,14 @@ const extensionConfig = {
       patterns: [
         {
           from: 'node_modules/monaco-editor/min/vs/loader.js',
-          to: 'monaco-editor/vs'
+          to: 'monaco-editor/node_modules/monaco-editor/min/vs/loader.js'
         },
         {
-          from: 'node_modules/monaco-editor/min/vs/editor/**/*.js',
-          to: 'monaco-editor',
+          from: 'node_modules/monaco-editor/min',
+          to: 'monaco-editor/node_modules/monaco-editor/min',
           globOptions: {
             ignore: ['**/*.d.ts']
           }
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/base/**/*.js',
-          to: 'monaco-editor',
-          globOptions: {
-            ignore: ['**/*.d.ts']
-          }
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/javascript/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/typescript/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/html/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/css/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/json/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/language/typescript/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true,
-          globOptions: {
-            ignore: ['**/*.d.ts']
-          }
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/language/json/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true,
-          globOptions: {
-            ignore: ['**/*.d.ts']
-          }
-        },
-        {
-          from: 'node_modules/monaco-editor/min/vs/basic-languages/**/*.js',
-          to: 'monaco-editor',
-          noErrorOnMissing: true
         },
         {
           from: 'media',

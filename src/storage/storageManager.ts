@@ -141,7 +141,10 @@ export class StorageManager {
 
       await vscode.workspace.fs.rename(tempFile, file, { overwrite: true })
       
-      // 更新缓存
+      // 更新缓存并清除读取Promise缓存
+      const fileKey = file.toString()
+      this.fileReadPromises.delete(fileKey)
+      
       if (file.path.includes('snippets.json')) {
         this.snippetsCache = data
         this.lastSnippetsRead = Date.now()
@@ -170,6 +173,7 @@ export class StorageManager {
     try {
       const now = Date.now()
       if (this.snippetsCache && (now - this.lastSnippetsRead < this.cacheLifetime)) {
+        console.log(`StorageManager: 使用缓存返回 ${this.snippetsCache.length} 个代码片段`)
         return this.snippetsCache
       }
       
@@ -177,6 +181,11 @@ export class StorageManager {
       
       this.snippetsCache = snippets
       this.lastSnippetsRead = now
+      
+      console.log(`StorageManager: 从文件读取 ${snippets.length} 个代码片段`)
+      if (snippets.length > 0) {
+        console.log('代码片段列表:', JSON.stringify(snippets.map((s: CodeSnippet) => ({ id: s.id, name: s.name, parentId: s.parentId })), null, 2))
+      }
       
       return snippets
     } catch (error) {

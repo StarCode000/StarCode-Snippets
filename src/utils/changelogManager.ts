@@ -18,7 +18,7 @@ export interface HistoryEntry {
   hash: string;
   timestamp: string;
   deviceTag?: string; // 设备标识码（可选，用于向后兼容）
-}
+    }
 
 // 变更集接口
 export interface ChangeSet {
@@ -57,7 +57,7 @@ export class ChangelogManager {
       if (!Object.values(OperationType).includes(operation as OperationType)) {
         console.warn(`跳过未知操作类型: ${operation}`);
         continue;
-      }
+  }
 
       const entry: HistoryEntry = {
         operation: operation as OperationType,

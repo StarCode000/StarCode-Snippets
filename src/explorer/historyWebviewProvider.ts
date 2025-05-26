@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CloudSyncManager } from '../utils/cloudSyncManager';
 import { ChangelogManager, HistoryEntry, OperationType } from '../utils/changelogManager';
 import { SettingsManager } from '../utils/settingsManager';
+import { StorageManager } from '../storage/storageManager';
 
 // 扩展历史记录条目，添加数据源信息
 interface ExtendedHistoryEntry extends HistoryEntry {
@@ -61,6 +62,12 @@ export class HistoryWebviewProvider {
           break;
         case 'downloadHistory':
           await this._downloadHistory(panel);
+          break;
+        case 'viewRawHistory':
+          await this._viewRawHistory(panel);
+          break;
+        case 'abandonLocalAndImport':
+          await this._abandonLocalAndImport(panel);
           break;
       }
     });
@@ -172,6 +179,135 @@ export class HistoryWebviewProvider {
     } catch (error) {
       console.error('下载历史记录失败:', error);
       vscode.window.showErrorMessage(`下载历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  }
+  
+  /**
+   * 查看原始历史记录内容
+   */
+  private async _viewRawHistory(panel: vscode.WebviewPanel) {
+    try {
+      const context = SettingsManager.getExtensionContext();
+      if (!context) {
+        throw new Error('扩展上下文未初始化');
+      }
+
+      // 获取本地历史记录
+      const localHistory = context.globalState.get('cloudSync.lastHistory', '');
+      
+      // 尝试获取云端历史记录
+      let remoteHistory = '';
+      try {
+        const cloudSyncManager = new CloudSyncManager(context);
+        const remoteCheck = await cloudSyncManager.checkRemoteUpdates();
+        if (remoteCheck.remoteHistory) {
+          remoteHistory = remoteCheck.remoteHistory;
+        }
+      } catch (error) {
+        console.warn('无法获取云端历史记录:', error);
+      }
+      
+      // 发送原始历史记录内容
+      panel.webview.postMessage({
+        type: 'rawHistoryData',
+        data: {
+          local: localHistory,
+          remote: remoteHistory
+        }
+      });
+      
+    } catch (error) {
+      console.error('查看原始历史记录失败:', error);
+      panel.webview.postMessage({
+        type: 'error',
+        message: `查看原始历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`
+      });
+    }
+  }
+
+  private async _abandonLocalAndImport(panel: vscode.WebviewPanel) {
+    try {
+      // 显示警告
+      const warningMessage = `⚠️ 重要操作确认 ⚠️
+
+此操作将：
+• 删除本地所有代码片段和目录
+• 清空本地历史记录
+• 从云端重新导入所有数据
+
+本地的所有未同步更改将丢失！
+请确保您了解此操作的后果。
+
+是否继续？`;
+
+      const choice = await vscode.window.showWarningMessage(
+        warningMessage,
+        { modal: true },
+        '我了解风险，继续执行',
+        '取消'
+      );
+
+      if (choice !== '我了解风险，继续执行') {
+        panel.webview.postMessage({
+          type: 'abandonLocalResult',
+          success: false,
+          message: '用户取消了操作'
+        });
+        return;
+      }
+
+      // 发送开始操作消息
+      panel.webview.postMessage({
+        type: 'abandonLocalStarted',
+        message: '正在从云端导入数据...'
+      });
+
+      // 获取扩展上下文
+      const context = SettingsManager.getExtensionContext();
+      if (!context) {
+        throw new Error('扩展上下文未初始化');
+      }
+
+      // 创建存储管理器实例
+      const storageManager = new StorageManager(context);
+      const cloudSyncManager = new CloudSyncManager(context, storageManager);
+      
+      if (!cloudSyncManager.isConfigured()) {
+        throw new Error('云端同步未配置，请先完成配置');
+      }
+
+      // 执行放弃本地并从云端导入
+      const result = await cloudSyncManager.abandonLocalAndImportFromCloud();
+      
+      // 发送结果消息
+      panel.webview.postMessage({
+        type: 'abandonLocalResult',
+        success: result.success,
+        message: result.message
+      });
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`✅ ${result.message}`);
+        
+        // 刷新树视图以显示导入的代码片段
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
+        
+        // 重新加载历史记录
+        await this._loadHistory(panel);
+      } else {
+        vscode.window.showWarningMessage(`⚠️ ${result.message}`);
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '从云端导入失败';
+      
+      panel.webview.postMessage({
+        type: 'abandonLocalResult',
+        success: false,
+        message: errorMessage
+      });
+
+      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`);
     }
   }
 
@@ -590,7 +726,9 @@ export class HistoryWebviewProvider {
             <h1>📊 同步历史记录</h1>
             <div class="header-actions">
                 <button id="refreshBtn" class="btn btn-secondary">🔄 刷新</button>
+                <button id="viewRawBtn" class="btn btn-secondary">📝 查看原始记录</button>
                 <button id="downloadBtn" class="btn btn-secondary">💾 下载</button>
+                <button id="abandonLocalBtn" class="btn btn-danger">📥 从云端导入</button>
             </div>
         </div>
 
@@ -703,6 +841,7 @@ export class HistoryWebviewProvider {
         const contentArea = document.getElementById('contentArea');
         const refreshBtn = document.getElementById('refreshBtn');
         const downloadBtn = document.getElementById('downloadBtn');
+        const abandonLocalBtn = document.getElementById('abandonLocalBtn');
         const operationFilter = document.getElementById('operationFilter');
         const sourceFilter = document.getElementById('sourceFilter');
         const timelineContainer = document.getElementById('timelineContainer');
@@ -715,6 +854,13 @@ export class HistoryWebviewProvider {
 
         downloadBtn.addEventListener('click', () => {
             vscode.postMessage({ type: 'downloadHistory' });
+        });
+
+        abandonLocalBtn.addEventListener('click', () => {
+            abandonLocalBtn.disabled = true;
+            abandonLocalBtn.textContent = '📥 导入中...';
+            
+            vscode.postMessage({ type: 'abandonLocalAndImport' });
         });
 
         operationFilter.addEventListener('change', applyFilters);
@@ -730,6 +876,9 @@ export class HistoryWebviewProvider {
                 const sourceMatch = sourceType === 'all' || entry.source === sourceType;
                 return operationMatch && sourceMatch;
             });
+            
+            // 确保过滤后的数据仍然按时间戳降序排列（最新的在前）
+            filteredEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
             
             renderTimeline();
         }
@@ -956,12 +1105,194 @@ export class HistoryWebviewProvider {
                     updateSyncStatus(message.data.syncStatus, message.data.syncConfig);
                     renderTimeline();
                     break;
+                
+                case 'rawHistoryData':
+                    handleRawHistoryData(message.data);
+                    break;
+
+                case 'abandonLocalStarted':
+                    loadingState.classList.remove('hidden');
+                    loadingState.innerHTML = '<p>' + message.message + '</p>';
+                    break;
+
+                case 'abandonLocalResult':
+                    abandonLocalBtn.disabled = false;
+                    abandonLocalBtn.textContent = '📥 从云端导入';
+                    
+                    if (message.success) {
+                        // 成功后重新加载历史记录
+                        vscode.postMessage({ type: 'loadHistory' });
+                    } else {
+                        loadingState.classList.add('hidden');
+                        errorState.classList.remove('hidden');
+                        errorState.textContent = message.message;
+                    }
+                    break;
             }
         });
+
+        // 添加原始历史记录对话框
+        function createRawHistoryDialog() {
+            // 如果已经存在，先移除
+            const existingDialog = document.querySelector('.raw-history-dialog');
+            if (existingDialog) {
+                document.body.removeChild(existingDialog);
+            }
+            
+            const dialog = document.createElement('div');
+            dialog.className = 'raw-history-dialog hidden';
+            dialog.innerHTML = \`
+                <div class="raw-history-content">
+                    <div class="raw-history-header">
+                        <h3>原始历史记录</h3>
+                        <button id="closeRawHistoryBtn" class="btn btn-secondary">✕ 关闭</button>
+                    </div>
+                    <div class="raw-history-tabs">
+                        <button id="localHistoryTab" class="history-tab active">本地历史</button>
+                        <button id="remoteHistoryTab" class="history-tab">云端历史</button>
+                    </div>
+                    <div class="raw-history-bodies">
+                        <div id="localHistoryBody" class="history-body">
+                            <pre id="localHistoryContent"></pre>
+                        </div>
+                        <div id="remoteHistoryBody" class="history-body hidden">
+                            <pre id="remoteHistoryContent"></pre>
+                        </div>
+                    </div>
+                </div>
+            \`;
+            document.body.appendChild(dialog);
+            
+            // 绑定事件 - 使用事件委托避免事件绑定问题
+            dialog.addEventListener('click', (event) => {
+                if (event.target.id === 'closeRawHistoryBtn' || event.target.closest('#closeRawHistoryBtn')) {
+                    dialog.classList.add('hidden');
+                }
+            });
+            
+            const localTab = document.getElementById('localHistoryTab');
+            const remoteTab = document.getElementById('remoteHistoryTab');
+            const localBody = document.getElementById('localHistoryBody');
+            const remoteBody = document.getElementById('remoteHistoryBody');
+            
+            localTab.addEventListener('click', () => {
+                localTab.classList.add('active');
+                remoteTab.classList.remove('active');
+                localBody.classList.remove('hidden');
+                remoteBody.classList.add('hidden');
+            });
+            
+            remoteTab.addEventListener('click', () => {
+                remoteTab.classList.add('active');
+                localTab.classList.remove('active');
+                remoteBody.classList.remove('hidden');
+                localBody.classList.add('hidden');
+            });
+            
+            return dialog;
+        }
+        
+        // 创建对话框
+        const rawHistoryDialog = createRawHistoryDialog();
+        
+        // 绑定查看原始历史记录按钮
+        const viewRawBtn = document.getElementById('viewRawBtn');
+        viewRawBtn.addEventListener('click', () => {
+            vscode.postMessage({ type: 'viewRawHistory' });
+        });
+        
+        // 接收原始历史记录数据
+        function handleRawHistoryData(data) {
+            const localContent = document.getElementById('localHistoryContent');
+            const remoteContent = document.getElementById('remoteHistoryContent');
+            
+            localContent.textContent = data.local || '无本地历史记录';
+            remoteContent.textContent = data.remote || '无远端历史记录';
+            
+            rawHistoryDialog.classList.remove('hidden');
+        }
 
         // 页面加载时请求数据
         vscode.postMessage({ type: 'loadHistory' });
     </script>
+    
+    <style>
+        .raw-history-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        .raw-history-content {
+            width: 80%;
+            height: 80%;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .raw-history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        
+        .raw-history-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        
+        .history-tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--vscode-descriptionForeground);
+        }
+        
+        .history-tab.active {
+            border-bottom: 2px solid var(--vscode-textLink-foreground);
+            color: var(--vscode-textLink-foreground);
+        }
+        
+        .raw-history-bodies {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .history-body {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+            padding: 20px;
+        }
+        
+        .history-body pre {
+            font-family: var(--vscode-editor-font-family);
+            font-size: 13px;
+            white-space: pre-wrap;
+            margin: 0;
+        }
+    </style>
 </body>
 </html>`;
   }

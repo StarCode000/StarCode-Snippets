@@ -68,6 +68,10 @@ export class SnippetEditor {
       retainContextWhenHidden: true,
         localResourceRoots: [
             vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist'),
+            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor'),
+            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules'),
+            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor'),
+            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor', 'min'),
             vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media') // 如果有其他media资源
         ]
       }
@@ -211,7 +215,8 @@ export class SnippetEditor {
   private _getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
     const extensionUri = this.extensionContext.extensionUri;
     
-    const monacoBasePath = vscode.Uri.joinPath(extensionUri, 'dist', 'monaco-editor');
+    // 修改monaco路径，指向正确的目录结构
+    const monacoBasePath = vscode.Uri.joinPath(extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor', 'min');
     const monacoLoaderUri = webview.asWebviewUri(vscode.Uri.joinPath(monacoBasePath, 'vs', 'loader.js'));
     const monacoBaseWebViewUri = webview.asWebviewUri(monacoBasePath);
     
@@ -275,7 +280,7 @@ export class SnippetEditor {
             max-height: 200px;
             overflow: auto;
             z-index: 9999;
-            display: none; /* 默认隐藏调试面板 */
+            display: block; /* 默认显示调试面板 */
           }
           .language-selector-container {
             display: flex;
@@ -341,7 +346,7 @@ export class SnippetEditor {
             </select>
           </div>
           <span id="status-message" class="status-message"></span>
-          <button id="debug-toggle">显示调试信息</button>
+          <button id="debug-toggle">隐藏调试信息</button>
         </div>
         <div id="editor-container"></div>
         <div id="debug-info"></div>
@@ -358,7 +363,23 @@ export class SnippetEditor {
           const debugInfoElement = document.getElementById('debug-info');
           const languageSelect = document.getElementById('language-select');
           const debugToggleButton = document.getElementById('debug-toggle');
-          let isDebugVisible = false; // 调试面板显示状态
+          let isDebugVisible = true; // 默认显示调试面板
+          
+          // 添加全局错误处理
+          window.onerror = function(message, source, lineno, colno, error) {
+            debugLog('Error: ' + message + ' at ' + source + ':' + lineno + ':' + colno);
+            if (error && error.stack) {
+              debugLog('Stack: ' + error.stack);
+            }
+            return false;
+          };
+          
+          // 添加资源加载错误处理
+          window.addEventListener('error', function(e) {
+            if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+              debugLog('Resource error: ' + e.target.src || e.target.href);
+            }
+          }, true);
           
           // 初始化调试面板切换按钮
           debugToggleButton.addEventListener('click', () => {
@@ -463,102 +484,145 @@ export class SnippetEditor {
                   }
                 }
                 
-                require.config({ 
-                    paths: { 'vs': \`\${ "${monacoBaseWebViewUri}".replace(/\\\\/g, '/') }/vs\` } 
-                });
-                debugLog('Monaco require.config 已设置');
-                
-                window.MonacoEnvironment = {
-                    getWorkerUrl: function (moduleId, label) {
-                        const workerPath = \`\${ "${monacoBaseWebViewUri}".replace(/\\\\/g, '/') }/vs/base/worker/workerMain.js\`;
-                        debugLog('获取 worker URL: ' + workerPath);
-                        return workerPath;
-                    }
-                };
-                debugLog('Monaco 环境配置完成');
-
-                require(['vs/editor/editor.main'], function () {
-                  debugLog('Monaco 编辑器主模块加载完成');
-                  if (editor) { 
-                    debugLog('销毁现有编辑器');
-                    editor.dispose(); 
-                  }
+                try {
+                  // 获取正确的路径前缀
+                  const monacoPath = "${monacoBaseWebViewUri.toString().replace(/\\\\/g, '/')}";
+                  debugLog('Monaco 基础路径: ' + monacoPath);
                   
-                  try {
-                    debugLog('创建 Monaco 编辑器实例');
-                    const editorContainer = document.getElementById('editor-container');
-                    if (!editorContainer) {
-                      debugLog('错误: 找不到编辑器容器元素!');
+                  // 准备多个可能的路径
+                  const possiblePaths = [
+                    monacoPath + '/vs',                            // 直接在当前目录
+                    monacoPath.replace('/min', '') + '/vs',        // 不包含min
+                    monacoPath.replace('/min', '/vs'),             // min替换为vs
+                    monacoPath + '/../vs'                          // 上一级目录
+                  ];
+                  
+                  debugLog('尝试以下路径:');
+                  possiblePaths.forEach(p => debugLog(' - ' + p));
+                  
+                  // 添加一个尝试不同路径的加载函数
+                  function tryLoadMonaco(pathIndex) {
+                    if (pathIndex >= possiblePaths.length) {
+                      debugLog('所有路径都尝试失败，无法加载Monaco');
+                      updateStatus('无法加载编辑器，请查看调试信息', true);
+                      isDebugVisible = true;
+                      debugInfoElement.style.display = 'block';
+                      debugToggleButton.textContent = '隐藏调试信息';
                       return;
                     }
                     
-                    debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
+                    const currentPath = possiblePaths[pathIndex];
+                    debugLog('尝试路径 ' + (pathIndex + 1) + '/' + possiblePaths.length + ': ' + currentPath);
                     
-                    // 保存初始代码内容以便于记录
-                    const initialCode = message.data.code || '';
-                    debugLog('初始代码内容长度: ' + initialCode.length);
-                    if (initialCode.length > 0) {
-                      debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
-                    } else {
-                      debugLog('警告: 初始代码内容为空!');
-                    }
+                    // 更新配置
+                    require.config({ paths: { 'vs': currentPath } });
                     
-                    editor = monaco.editor.create(editorContainer, {
-                      value: initialCode,
-                      language: currentLanguage,
-                      theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
-                      automaticLayout: true,
-                      wordWrap: 'on',
-                      minimap: { enabled: true },
-                      scrollbar: {
-                          useShadows: false,
-                          verticalScrollbarSize: 10,
-                          horizontalScrollbarSize: 10
+                    window.MonacoEnvironment = {
+                      getWorkerUrl: function (moduleId, label) {
+                        const workerPath = currentPath + '/base/worker/workerMain.js';
+                        debugLog('Worker URL: ' + workerPath);
+                        return workerPath;
                       }
-                    });
+                    };
                     
-                    debugLog('Monaco 编辑器实例创建成功');
-                    
-                    // 验证编辑器的值是否正确设置
-                    setTimeout(() => {
-                      const currentValue = editor.getValue();
-                      debugLog('编辑器内容长度(延迟检查): ' + currentValue.length);
-                      if (currentValue.length === 0 && initialCode.length > 0) {
-                        debugLog('警告: 编辑器内容为空，但初始代码不为空!');
+                    // 尝试加载
+                    require(['vs/editor/editor.main'], function () {
+                      debugLog('Monaco成功加载，使用路径: ' + currentPath);
+                      // 继续使用现有的编辑器创建逻辑
+                      if (editor) { 
+                        debugLog('销毁现有编辑器');
+                        editor.dispose(); 
                       }
-                    }, 500);
-                  } catch (error) {
-                    debugLog('创建编辑器实例出错: ' + error.toString());
-                    console.error('创建编辑器错误:', error);
-                  }
+                      
+                      try {
+                        debugLog('创建 Monaco 编辑器实例');
+                        const editorContainer = document.getElementById('editor-container');
+                        if (!editorContainer) {
+                          debugLog('错误: 找不到编辑器容器元素!');
+                          return;
+                        }
+                        
+                        debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
+                        
+                        // 保存初始代码内容以便于记录
+                        const initialCode = message.data.code || '';
+                        debugLog('初始代码内容长度: ' + initialCode.length);
+                        if (initialCode.length > 0) {
+                          debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
+                        } else {
+                          debugLog('警告: 初始代码内容为空!');
+                        }
+                        
+                        editor = monaco.editor.create(editorContainer, {
+                          value: initialCode,
+                          language: currentLanguage,
+                          theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
+                          automaticLayout: true,
+                          wordWrap: 'on',
+                          minimap: { enabled: true },
+                          scrollbar: {
+                              useShadows: false,
+                              verticalScrollbarSize: 10,
+                              horizontalScrollbarSize: 10
+                          }
+                        });
+                        
+                        debugLog('Monaco 编辑器实例创建成功');
+                        
+                        // 验证编辑器的值是否正确设置
+                        setTimeout(() => {
+                          const currentValue = editor.getValue();
+                          debugLog('编辑器内容长度(延迟检查): ' + currentValue.length);
+                          if (currentValue.length === 0 && initialCode.length > 0) {
+                            debugLog('警告: 编辑器内容为空，但初始代码不为空!');
+                          }
+                        }, 500);
+                      } catch (error) {
+                        debugLog('创建编辑器实例出错: ' + error.toString());
+                        console.error('创建编辑器错误:', error);
+                      }
 
-                  try {
-                    debugLog('设置编辑器事件监听器');
-                    editor.onDidChangeModelContent(() => {
-                      internalDirtyFlag = true;
-                      vscode.postMessage({ 
-                          type: 'contentChanged', 
-                          snippetId: currentSnippetId, 
-                          data: { 
-                            code: editor.getValue(),
-                            language: currentLanguage
-                          } 
-                      });
-                      updateStatus('未保存的更改');
-                      debugLog('内容已更改，已发送 contentChanged 消息');
-                    });
+                      try {
+                        debugLog('设置编辑器事件监听器');
+                        editor.onDidChangeModelContent(() => {
+                          internalDirtyFlag = true;
+                          vscode.postMessage({ 
+                              type: 'contentChanged', 
+                              snippetId: currentSnippetId, 
+                              data: { 
+                                code: editor.getValue(),
+                                language: currentLanguage
+                              } 
+                          });
+                          updateStatus('未保存的更改');
+                          debugLog('内容已更改，已发送 contentChanged 消息');
+                        });
 
-                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
-                      debugLog('检测到 Ctrl+S 快捷键');
-                      if (!saveInProgress) saveContent();
+                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
+                          debugLog('检测到 Ctrl+S 快捷键');
+                          if (!saveInProgress) saveContent();
+                        });
+                        debugLog('编辑器事件监听器设置完成');
+                      } catch (error) {
+                        debugLog('设置事件监听器出错: ' + error.toString());
+                      }
+                    }, function(error) {
+                      debugLog('路径 ' + currentPath + ' 加载失败: ' + JSON.stringify(error));
+                      // 尝试下一个路径
+                      setTimeout(() => tryLoadMonaco(pathIndex + 1), 100);
                     });
-                    debugLog('编辑器事件监听器设置完成');
-                  } catch (error) {
-                    debugLog('设置事件监听器出错: ' + error.toString());
                   }
-                }, function(error) {
-                  debugLog('加载 Monaco 编辑器失败: ' + error.toString());
-                });
+                  
+                  // 开始尝试加载
+                  tryLoadMonaco(0);
+                } catch (error) {
+                  debugLog('Monaco配置错误: ' + (error.message || error));
+                  updateStatus('Monaco配置错误，请查看调试信息', true);
+                  // 显示调试面板
+                  isDebugVisible = true;
+                  debugInfoElement.style.display = 'block';
+                  debugToggleButton.textContent = '隐藏调试信息';
+                }
                 break;
               case 'saveSuccess':
                 debugLog('保存成功');

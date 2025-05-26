@@ -1,5 +1,7 @@
 // src/models/types.ts
-export interface CodeSnippet {
+
+// ===== V1 类型（向后兼容，基于ID和parentId） =====
+export interface CodeSnippetV1 {
   id: string
   name: string
   code: string
@@ -12,12 +14,52 @@ export interface CodeSnippet {
   language?: string // 代码语言，可选属性
 }
 
-export interface Directory {
+export interface DirectoryV1 {
   id: string
   name: string
   parentId: string | null
   order: number
 }
+
+// ===== V2 类型（新版本，基于路径） =====
+export interface CodeSnippetV2 {
+  name: string
+  code: string
+  filePath: string
+  fileName: string
+  category: string
+  fullPath: string // 完整路径，如 "/lims/人员选择template"
+  order: number
+  createTime: number
+  language?: string // 代码语言，可选属性
+}
+
+export interface DirectoryV2 {
+  name: string
+  fullPath: string // 完整路径，如 "/lims/"
+  order: number
+}
+
+// ===== 当前使用的类型别名（指向V1以保持兼容性） =====
+export type CodeSnippet = CodeSnippetV1
+export type Directory = DirectoryV1
+
+// ===== 导出数据格式 =====
+export interface ExportDataV1 {
+  version: "1.0.0"
+  exportDate: string
+  directories: DirectoryV1[]
+  snippets: CodeSnippetV1[]
+}
+
+export interface ExportDataV2 {
+  version: "2.0.0"
+  exportDate: string
+  directories: DirectoryV2[]
+  snippets: CodeSnippetV2[]
+}
+
+export type ExportData = ExportDataV1 | ExportDataV2
 
 // 云端同步配置接口
 export interface CloudSyncConfig {

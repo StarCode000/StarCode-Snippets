@@ -13,6 +13,9 @@ import { CloudSyncManager } from './utils/cloudSyncManager';
 import { AutoSyncManager } from './utils/autoSyncManager';
 import { ContextManager } from './utils/contextManager';
 import { SyncStatusManager } from './utils/syncStatusManager';
+import { StorageStrategyFactory } from './utils/storageStrategy';
+import { StorageContext } from './utils/storageContext';
+import { registerMigrateCommands } from './commands/migrateCommand';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.time('starcode-snippets:activate');
@@ -23,13 +26,34 @@ export function activate(context: vscode.ExtensionContext): void {
     console.log('初始化设置管理器...');
     SettingsManager.setExtensionContext(context);
     
-    // 创建存储管理器
-    console.log('创建存储管理器...');
+    // 使用策略模式初始化存储
+    const storageStrategy = StorageStrategyFactory.createStrategy(context);
+    const storageContext = new StorageContext(storageStrategy);
+    
+    // 创建真实的StorageManager实例，但后续使用StorageContext进行操作
     const storageManager = new StorageManager(context);
     
-    // 创建搜索管理器
-    console.log('创建搜索管理器...');
+    // 重写StorageManager的关键方法，代理到StorageContext
+    const originalGetAllSnippets = storageManager.getAllSnippets;
+    const originalGetAllDirectories = storageManager.getAllDirectories;
+    
+    // 重写关键方法
+    storageManager.getAllSnippets = () => storageContext.getAllSnippets();
+    storageManager.getAllDirectories = () => storageContext.getAllDirectories();
+    storageManager.saveSnippet = (snippet: any) => storageContext.saveSnippet(snippet);
+    storageManager.updateSnippet = (snippet: any) => storageContext.updateSnippet(snippet);
+    storageManager.deleteSnippet = (id: string) => storageContext.deleteSnippet(id);
+    storageManager.createDirectory = (directory: any) => storageContext.createDirectory(directory);
+    storageManager.updateDirectory = (directory: any) => storageContext.updateDirectory(directory);
+    storageManager.deleteDirectory = (id: string) => storageContext.deleteDirectory(id);
+    storageManager.clearCache = () => storageContext.clearCache();
+    
+    // 创建标准组件
     const searchManager = new SearchManager();
+    const treeDataProvider = new SnippetsTreeDataProvider(storageManager, searchManager);
+    
+    // 添加在注册命令前，注册迁移命令
+    context.subscriptions.push(...registerMigrateCommands(context, storageContext));
     
     // 创建自动同步管理器
     console.log('创建自动同步管理器...');
@@ -38,10 +62,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // 初始化同步状态管理器
     console.log('初始化同步状态管理器...');
     const syncStatusManager = SyncStatusManager.getInstance(context);
-    
-    // 创建树视图数据提供程序
-    console.log('创建树视图数据提供程序...');
-    const treeDataProvider = new SnippetsTreeDataProvider(storageManager, searchManager);
     
     // 设置自动同步管理器的刷新回调
     autoSyncManager.setRefreshCallback(() => {
@@ -102,7 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
         
         // 注册所有命令
         console.log('注册所有命令...');
-      const commands = registerCommands(context, storageManager, treeDataProvider, searchManager, autoSyncManager);
+      const commands = registerCommands(context, storageManager, treeDataProvider, searchManager, autoSyncManager, storageContext);
         
         // 添加命令到订阅中
         context.subscriptions.push(...commands);
@@ -144,10 +164,11 @@ function registerCommands(
   storageManager: StorageManager, 
   treeDataProvider: SnippetsTreeDataProvider,
   searchManager: SearchManager,
-  autoSyncManager: AutoSyncManager
+  autoSyncManager: AutoSyncManager,
+  storageContext: StorageContext
 ): vscode.Disposable[] {
   // 创建导入导出管理器
-  const importExportManager = new ImportExportManager(storageManager);
+  const importExportManager = new ImportExportManager(storageManager, storageContext);
 
   // 内部刷新视图函数
   function refreshTreeView(): void {
@@ -618,6 +639,44 @@ function registerCommands(
     }
   );
 
+  // 注册选择导出格式命令
+  const selectExportFormat = vscode.commands.registerCommand(
+    'starcode-snippets.selectExportFormat',
+    async () => {
+      const currentVersion = storageContext.getVersion();
+      const options = [
+        { label: 'V1格式 (基于ID)', description: '兼容旧版本', value: 'v1' },
+        { label: 'V2格式 (基于路径)', description: '新版本', value: 'v2' }
+      ];
+      
+      // 标记当前使用的格式
+      options.forEach(opt => {
+        if (opt.value === currentVersion) {
+          opt.description += ' (当前)';
+        }
+      });
+      
+      const selected = await vscode.window.showQuickPick(options, {
+        placeHolder: '选择导出格式',
+        title: '选择代码片段导出格式'
+      });
+      
+      if (selected) {
+        // 根据选择的格式导出
+        if (selected.value === 'v1' && currentVersion === 'v2') {
+          // 临时切换到V1格式导出
+          await importExportManager.exportWithFormat('v1');
+        } else if (selected.value === 'v2' && currentVersion === 'v1') {
+          // 临时切换到V2格式导出
+          await importExportManager.exportWithFormat('v2');
+        } else {
+          // 使用当前格式导出
+          await importExportManager.exportAllSnippets();
+        }
+      }
+    }
+  );
+
   // 注册导入代码片段命令
   const importSnippets = vscode.commands.registerCommand(
     'starcode-snippets.importSnippets',
@@ -760,7 +819,7 @@ function registerCommands(
       } catch (error) {
         console.error('获取同步状态失败:', error);
         vscode.window.showErrorMessage(`获取同步状态失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      }
+    }
     }
   );
 
@@ -846,6 +905,7 @@ function registerCommands(
     createSnippetInDirectory,
     exportSnippet,
     exportAll,
+    selectExportFormat,
     importSnippets,
     searchSnippets,
     clearSearch,

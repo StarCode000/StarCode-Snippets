@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.3.0",
+  "version": "0.3.1",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -125,6 +125,12 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "starcode-snippets.selectExportFormat",
+        "title": "选择导出格式",
+        "category": "StarCode Snippets",
+        "icon": "$(versions)"
+      },
+      {
         "command": "starcode-snippets.importSnippets",
         "title": "导入代码片段",
         "category": "StarCode Snippets",
@@ -196,7 +202,7 @@
         "category": "StarCode Snippets",
         "icon": "$(pulse)"
       }
-      ],
+    ],
     "menus": {
       "editor/context": [
         {
@@ -242,6 +248,11 @@
           "command": "starcode-snippets.exportAll",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
+        },
+        {
+          "command": "starcode-snippets.selectExportFormat",
+          "when": "view == starCodeSnippetsExplorer",
+          "group": "navigation@7"
         }
       ],
       "view/item/context": [

@@ -75,6 +75,9 @@ export class SettingsWebviewProvider {
         case 'forceResetCloudSync':
           await this._forceResetCloudSync(panel);
           break;
+        case 'abandonLocalAndImport':
+          await this._abandonLocalAndImport(panel);
+          break;
       }
     });
 
@@ -621,6 +624,10 @@ export class SettingsWebviewProvider {
 
       if (result.success) {
         vscode.window.showInformationMessage(`✅ ${result.message}`);
+        
+        // 刷新树视图以显示重置后的状态
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
+        
         // 重新发送配置和状态到webview
         await this._sendConfigToWebview(panel);
       } else {
@@ -637,6 +644,102 @@ export class SettingsWebviewProvider {
       });
 
       vscode.window.showErrorMessage(`❌ 强制重置失败: ${errorMessage}`);
+    }
+  }
+
+  private async _abandonLocalAndImport(panel: vscode.WebviewPanel) {
+    try {
+      // 检查是否正在编辑代码片段
+      if (ContextManager.isEditingSnippet()) {
+        panel.webview.postMessage({
+          type: 'abandonLocalResult',
+          success: false,
+          message: '用户正在编辑代码片段，请完成编辑后再进行操作'
+        });
+        return;
+      }
+
+      // 显示警告
+      const warningMessage = `⚠️ 重要操作确认 ⚠️
+
+此操作将：
+• 删除本地所有代码片段和目录
+• 清空本地历史记录
+• 从云端重新导入所有数据
+
+本地的所有未同步更改将丢失！
+请确保您了解此操作的后果。
+
+是否继续？`;
+
+      const choice = await vscode.window.showWarningMessage(
+        warningMessage,
+        { modal: true },
+        '我了解风险，继续执行',
+        '取消'
+      );
+
+      if (choice !== '我了解风险，继续执行') {
+        panel.webview.postMessage({
+          type: 'abandonLocalResult',
+          success: false,
+          message: '用户取消了操作'
+        });
+        return;
+      }
+
+      // 发送开始操作消息
+      panel.webview.postMessage({
+        type: 'abandonLocalStarted',
+        message: '正在从云端导入数据...'
+      });
+
+      // 获取扩展上下文和存储管理器
+      const context = SettingsManager.getExtensionContext();
+      if (!context) {
+        throw new Error('扩展上下文未初始化');
+      }
+
+      // 创建存储管理器实例
+      const storageManager = new StorageManager(context);
+      const cloudSyncManager = new CloudSyncManager(context, storageManager);
+      
+      if (!cloudSyncManager.isConfigured()) {
+        throw new Error('云端同步未配置，请先完成配置');
+      }
+
+      // 执行放弃本地并从云端导入
+      const result = await cloudSyncManager.abandonLocalAndImportFromCloud();
+      
+      // 发送结果消息
+      panel.webview.postMessage({
+        type: 'abandonLocalResult',
+        success: result.success,
+        message: result.message
+      });
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`✅ ${result.message}`);
+        
+        // 刷新树视图以显示导入的代码片段
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
+        
+        // 重新发送配置和状态到webview
+        await this._sendConfigToWebview(panel);
+      } else {
+        vscode.window.showWarningMessage(`⚠️ ${result.message}`);
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '从云端导入失败';
+      
+      panel.webview.postMessage({
+        type: 'abandonLocalResult',
+        success: false,
+        message: errorMessage
+      });
+
+      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`);
     }
   }
 
@@ -946,19 +1049,39 @@ export class SettingsWebviewProvider {
         <!-- 危险操作区域 -->
         <div class="section">
             <div class="section-title" style="color: var(--vscode-errorForeground);">🚨 危险操作</div>
-            <p class="help-text">
-                <strong style="color: var(--vscode-errorForeground);">强制重置云端同步：</strong>
-                清空云端所有同步文件和本地历史记录，然后重新初始化云端同步。
-                <br><br>
-                <span style="color: var(--vscode-errorForeground);">⚠️ 这是一个不可逆的操作！只有在遇到严重同步问题时才使用此功能。</span>
-                <br><br>
-                <strong>使用场景：</strong>
-                <br>• 多设备同步出现严重冲突
-                <br>• 历史记录损坏导致无法同步
-                <br>• 需要完全重新开始同步
-            </p>
-            <div class="button-group">
-                <button id="forceResetBtn" class="btn btn-danger">🚨 强制重置云端同步</button>
+            
+            <div style="margin-bottom: 20px;">
+                <p class="help-text">
+                    <strong style="color: var(--vscode-notificationsWarningIcon-foreground);">从云端导入：</strong>
+                    删除本地所有代码片段和目录，从云端重新导入所有数据。
+                    <br><br>
+                    <strong>使用场景：</strong>
+                    <br>• 本地数据损坏，需要从云端恢复
+                    <br>• 想要放弃本地更改，使用云端版本
+                    <br>• 在新设备上首次同步
+                    <br><br>
+                    <span style="color: var(--vscode-notificationsWarningIcon-foreground);">⚠️ 本地所有未同步的更改将丢失！</span>
+                </p>
+                <div class="button-group">
+                    <button id="abandonLocalBtn" class="btn btn-danger">📥 放弃本地，从云端导入</button>
+                </div>
+            </div>
+
+            <div>
+                <p class="help-text">
+                    <strong style="color: var(--vscode-errorForeground);">强制重置云端同步：</strong>
+                    清空云端所有同步文件和本地历史记录，然后重新初始化云端同步。
+                    <br><br>
+                    <span style="color: var(--vscode-errorForeground);">⚠️ 这是一个不可逆的操作！只有在遇到严重同步问题时才使用此功能。</span>
+                    <br><br>
+                    <strong>使用场景：</strong>
+                    <br>• 多设备同步出现严重冲突
+                    <br>• 历史记录损坏导致无法同步
+                    <br>• 需要完全重新开始同步
+                </p>
+                <div class="button-group">
+                    <button id="forceResetBtn" class="btn btn-danger">🚨 强制重置云端同步</button>
+                </div>
             </div>
         </div>
 
@@ -1005,6 +1128,7 @@ export class SettingsWebviewProvider {
         const exportBtn = document.getElementById('exportBtn');
         const importBtn = document.getElementById('importBtn');
         const forceResetBtn = document.getElementById('forceResetBtn');
+        const abandonLocalBtn = document.getElementById('abandonLocalBtn');
 
         // 显示状态消息
         function showStatus(message, type = 'info') {
@@ -1136,6 +1260,15 @@ export class SettingsWebviewProvider {
             });
         });
 
+        abandonLocalBtn.addEventListener('click', () => {
+            abandonLocalBtn.disabled = true;
+            abandonLocalBtn.textContent = '📥 导入中...';
+            
+            vscode.postMessage({
+                type: 'abandonLocalAndImport'
+            });
+        });
+
         // 处理来自扩展的消息
         window.addEventListener('message', event => {
             const message = event.data;
@@ -1206,6 +1339,16 @@ export class SettingsWebviewProvider {
                 case 'forceResetResult':
                     forceResetBtn.disabled = false;
                     forceResetBtn.textContent = '🚨 强制重置云端同步';
+                    showStatus(message.message, message.success ? 'success' : 'error');
+                    break;
+
+                case 'abandonLocalStarted':
+                    showStatus(message.message, 'warning');
+                    break;
+
+                case 'abandonLocalResult':
+                    abandonLocalBtn.disabled = false;
+                    abandonLocalBtn.textContent = '📥 放弃本地，从云端导入';
                     showStatus(message.message, message.success ? 'success' : 'error');
                     break;
             }
