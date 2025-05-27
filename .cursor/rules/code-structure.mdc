@@ -1,0 +1,33 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 代码结构
+
+## 目录结构
+- `src/commands/` - 复杂命令实现
+- `src/editor/` - 编辑器相关功能
+- `src/provider/` - 提供插件的视图与视图数据
+- `src/storage/` - 存储管理相关功能
+- `src/types/` - TypeScript 类型定义
+- `src/utils/` - 工具函数
+
+## 代码组织方式
+1. **命令模块**：复杂的扩展命令在 `src/commands/` 中单独实现
+2. **视图**：在 `src/provider/` 中实现树视图
+3. **存储层**：`src/storage/` 处理本地和云端数据持久化
+4. **模型**：`src/types/` 定义了代码片段和目录的数据结构
+
+## 主要组件
+- **Snippet Explorer**：代码片段资源管理器，显示在 VSCode 活动栏中
+- **Storage Manager**：管理本地存储和云同步
+- **命令控制器**：处理各种用户操作
+- **编辑器集成**：处理代码片段的编辑和预览
+
+## 扩展点
+- 活动栏视图容器：`starcode-snippets-container`
+- 视图：`starCodeSnippetsExplorer`
+- 命令：多个以 `starcode-snippets.` 为前缀的命令
+- 编辑器上下文菜单：用于保存选中代码
+

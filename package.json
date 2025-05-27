@@ -9,14 +9,16 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.2.0",
+  "version": "0.3.1",
   "engines": {
     "vscode": "^1.15.0"
   },
   "categories": [
     "Snippets"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -31,11 +33,19 @@
     "views": {
       "starcode-snippets-container": [
         {
-          "id": "copyCodeExplorer",
-          "name": "代码库"
+          "id": "starCodeSnippetsExplorer",
+          "name": "代码库",
+          "when": "true"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "starCodeSnippetsExplorer",
+        "contents": "欢迎使用 StarCode Snippets！\n[创建第一个目录](command:starcode-snippets.createDirectory)\n[保存代码片段](command:starcode-snippets.saveToLibrary)",
+        "when": "true"
+      }
+    ],
     "commands": [
       {
         "command": "starcode-snippets.saveToLibrary",
@@ -136,7 +146,55 @@
         "command": "starcode-snippets.toggleSearchMode",
         "title": "切换搜索模式",
         "category": "StarCode Snippets",
+        "icon": "$(issue-reopened)"
+      },
+      {
+        "command": "starcode-snippets.openSettings",
+        "title": "云端同步设置",
+        "category": "StarCode Snippets",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "starcode-snippets.manualSync",
+        "title": "手动同步到云端",
+        "category": "StarCode Snippets",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "starcode-snippets.viewHistory",
+        "title": "查看同步历史",
+        "category": "StarCode Snippets",
+        "icon": "$(history)"
+      },
+      {
+        "command": "starcode-snippets.startAutoSync",
+        "title": "启动自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(play)"
+      },
+      {
+        "command": "starcode-snippets.stopAutoSync",
+        "title": "停止自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "starcode-snippets.restartAutoSync",
+        "title": "重启自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "starcode-snippets.autoSyncStatus",
+        "title": "查看自动同步状态",
+        "category": "StarCode Snippets",
+        "icon": "$(info)"
+      },
+      {
+        "command": "starcode-snippets.showSyncStatus",
+                "title": "查看同步状态详情",
+        "category": "StarCode Snippets",
+        "icon": "$(pulse)"
       }
     ],
     "menus": {
@@ -157,120 +215,130 @@
       "view/title": [
         {
           "command": "starcode-snippets.searchSnippets",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@1"
         },
         {
           "command": "starcode-snippets.clearSearch",
-          "when": "view == copyCodeExplorer && starcode-snippets.hasActiveSearch",
+          "when": "view == starCodeSnippetsExplorer && starcode-snippets.hasActiveSearch",
           "group": "navigation@2"
         },
         {
           "command": "starcode-snippets.toggleSearchMode",
-          "when": "view == copyCodeExplorer",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@3"
         },
         {
-          "command": "starcode-snippets.refreshExplorer",
-          "when": "view == copyCodeExplorer",
+          "command": "starcode-snippets.createDirectory",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@4"
         },
         {
-          "command": "starcode-snippets.createDirectory",
-          "when": "view == copyCodeExplorer",
+          "command": "starcode-snippets.importSnippets",
+          "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@5"
         },
         {
-          "command": "starcode-snippets.importSnippets",
-          "when": "view == copyCodeExplorer",
-          "group": "navigation@6"
-        },
-        {
           "command": "starcode-snippets.exportAll",
-          "when": "view == copyCodeExplorer",
-          "group": "navigation@7"
+          "when": "view == starCodeSnippetsExplorer",
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
         {
           "command": "starcode-snippets.createSnippetInDirectory",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@1"
         },
         {
           "command": "starcode-snippets.rename",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@2"
         },
         {
           "command": "starcode-snippets.delete",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "inline@3"
         },
         {
           "command": "starcode-snippets.createSnippetInDirectory",
-          "when": "view == copyCodeExplorer && viewItem == directory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "1_creation@1"
         },
         {
           "command": "starcode-snippets.previewSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@1"
         },
         {
           "command": "starcode-snippets.editSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@2"
         },
         {
           "command": "starcode-snippets.appendCode",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@3"
         },
         {
           "command": "starcode-snippets.moveToDirectory",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@4"
         },
         {
           "command": "starcode-snippets.rename",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@5"
         },
         {
           "command": "starcode-snippets.exportSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@6"
         },
         {
           "command": "starcode-snippets.delete",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@7"
         },
         {
           "command": "starcode-snippets.appendCode",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@1"
         },
         {
           "command": "starcode-snippets.editSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@2"
         },
         {
           "command": "starcode-snippets.previewSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "3_snippetactions@3"
         },
         {
           "command": "starcode-snippets.moveToDirectory",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "4_organization@1"
         },
         {
           "command": "starcode-snippets.exportSnippet",
-          "when": "view == copyCodeExplorer && viewItem == snippet",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "5_export@1"
+        },
+        {
+          "command": "starcode-snippets.manualSync",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
+          "group": "inline@1"
+        },
+        {
+          "command": "starcode-snippets.openSettings",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
+          "group": "inline@2"
+        },
+        {
+          "command": "starcode-snippets.viewHistory",
+          "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
+          "group": "inline@3"
         }
       ]
     },
@@ -280,13 +348,133 @@
       },
       "virtualWorkspaces": true,
       "treeItemButtons": true
+    },
+    "configuration": {
+      "title": "StarCode Snippets",
+      "properties": {
+        "starcode-snippets.cloudSync": {
+          "type": "object",
+          "default": {
+            "endpoint": "",
+            "accessKey": "",
+            "secretKey": "",
+            "bucket": "",
+            "region": "",
+            "timeout": 30,
+            "addressing": "virtual-hosted-style",
+            "autoSync": false,
+            "syncInterval": 60,
+            "concurrency": 3
+          },
+          "description": "云端同步配置",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "S3兼容存储服务的端点地址"
+            },
+            "accessKey": {
+              "type": "string",
+              "description": "访问密钥"
+            },
+            "secretKey": {
+              "type": "string",
+              "description": "密钥"
+            },
+            "bucket": {
+              "type": "string",
+              "description": "存储桶名称"
+            },
+            "region": {
+              "type": "string",
+              "description": "区域标识符"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "连接超时时间（秒）",
+              "minimum": 1,
+              "maximum": 300,
+              "default": 30
+            },
+            "addressing": {
+              "type": "string",
+              "enum": [
+                "virtual-hosted-style",
+                "path-style"
+              ],
+              "description": "URL寻址方式",
+              "default": "virtual-hosted-style"
+            },
+            "autoSync": {
+              "type": "boolean",
+              "description": "是否启用自动同步",
+              "default": false
+            },
+            "syncInterval": {
+              "type": "number",
+              "description": "自动同步间隔（秒）",
+              "minimum": 10,
+              "maximum": 3600,
+              "default": 60
+            },
+            "concurrency": {
+              "type": "number",
+              "description": "请求并发数",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
+          }
+        },
+        "starcode-snippets.cloudSyncStatus": {
+          "type": "object",
+          "default": {
+            "isConnected": false,
+            "lastSyncTime": null,
+            "lastError": null,
+            "isSyncing": false
+          },
+          "description": "云端同步状态",
+          "properties": {
+            "isConnected": {
+              "type": "boolean",
+              "description": "是否已连接"
+            },
+            "lastSyncTime": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "上次同步时间"
+            },
+            "lastError": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "最后一次错误信息"
+            },
+            "isSyncing": {
+              "type": "boolean",
+              "description": "是否正在同步"
+            }
+          }
+        },
+        "starcode-snippets.storageVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"],
+          "default": "v2",
+          "description": "存储数据格式版本"
+        }
+      }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "package": "webpack --mode production --devtool source-map",
+    "build": "node build-extension.js",
+    "build:quick": "npm run package && vsce package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
@@ -294,6 +482,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
+    "@types/diff": "^5.2.3",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/vscode": "^1.15.0",
@@ -306,12 +495,16 @@
     "eslint": "^9.19.0",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
     "webpack": "5.75.0",
     "webpack-cli": "5.0.1"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.817.0",
+    "diff": "^5.1.0",
     "monaco-editor": "^0.52.2",
+    "node-diff3": "^3.1.2",
     "uuid": "^11.1.0"
   }
 }
