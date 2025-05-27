@@ -1,6 +1,6 @@
 // src/editor/snippetEditor.ts
 import * as vscode from 'vscode'
-import { CodeSnippet } from '../models/types'
+import { CodeSnippet } from '../types/types'
 // import { v4 as uuidv4 } from 'uuidv4' // May not be needed for panel keys if snippet ID is used
 import { StorageManager } from '../storage/storageManager'
 import { ContextManager } from '../utils/contextManager'
@@ -15,13 +15,22 @@ export class SnippetEditor {
 
   // 跟踪当前正在编辑的Webview面板
   // Key: snippet.id, Value: { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }
-  private editingWebviews = new Map<string, { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }>()
-  
+  private editingWebviews = new Map<
+    string,
+    {
+      snippet: CodeSnippet
+      panel: vscode.WebviewPanel
+      currentCode: string
+      lastSavedCode: string
+      isDirtyInWebview: boolean
+    }
+  >()
+
   private _onDidSaveSnippet = new vscode.EventEmitter<CodeSnippet>()
   public readonly onDidSaveSnippet = this._onDidSaveSnippet.event
 
   private constructor(context: vscode.ExtensionContext, storageManager: StorageManager) {
-    this.extensionContext = context;
+    this.extensionContext = context
     this.storageManager = storageManager
   }
 
@@ -40,193 +49,223 @@ export class SnippetEditor {
   }
 
   private getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let text = ''
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
+      text += possible.charAt(Math.floor(Math.random() * possible.length))
     }
-    return text;
+    return text
   }
 
   public async edit(snippet: CodeSnippet): Promise<void> {
-    const column = vscode.window.activeTextEditor
-      ? vscode.window.activeTextEditor.viewColumn
-      : undefined;
+    const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined
 
-    const existingSession = this.editingWebviews.get(snippet.id);
+    const existingSession = this.editingWebviews.get(snippet.id)
     if (existingSession) {
-      existingSession.panel.reveal(column);
-      return;
+      existingSession.panel.reveal(column)
+      return
     }
 
     const panel = vscode.window.createWebviewPanel(
-      'starcodeSnippetEditor', 
-      `编辑: ${snippet.name}`, 
-      column || vscode.ViewColumn.One, 
+      'starcodeSnippetEditor',
+      `编辑: ${snippet.name}`,
+      column || vscode.ViewColumn.One,
       {
-      enableScripts: true,
-      retainContextWhenHidden: true,
+        enableScripts: true,
+        retainContextWhenHidden: true,
         localResourceRoots: [
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist'),
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor'),
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules'),
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor'),
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor', 'min'),
-            vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media') // 如果有其他media资源
-        ]
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist'),
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor'),
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules'),
+          vscode.Uri.joinPath(
+            this.extensionContext.extensionUri,
+            'dist',
+            'monaco-editor',
+            'node_modules',
+            'monaco-editor'
+          ),
+          vscode.Uri.joinPath(
+            this.extensionContext.extensionUri,
+            'dist',
+            'monaco-editor',
+            'node_modules',
+            'monaco-editor',
+            'min'
+          ),
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media'), // 如果有其他media资源
+        ],
       }
-    );
-    
-    const initialCode = snippet.code || '';
+    )
+
+    const initialCode = snippet.code || ''
     const session = {
       snippet,
       panel,
       currentCode: initialCode,
       lastSavedCode: initialCode,
       isDirtyInWebview: false, // Webview会通过消息更新这个状态
-    };
-    this.editingWebviews.set(snippet.id, session);
+    }
+    this.editingWebviews.set(snippet.id, session)
 
-    panel.webview.html = this._getWebviewContent(panel.webview, snippet);
+    panel.webview.html = this._getWebviewContent(panel.webview, snippet)
 
-    panel.onDidDispose(() => {
-      const disposedSession = this.editingWebviews.get(snippet.id);
-      if (disposedSession && disposedSession.isDirtyInWebview) {
-        console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`);
-        // 自动保存逻辑
-        const codeToSave = disposedSession.currentCode; // 使用webview同步过来的最新代码
-        const languageToSave = this.mapVSCodeLanguageIdToOurs(
+    panel.onDidDispose(
+      () => {
+        const disposedSession = this.editingWebviews.get(snippet.id)
+        if (disposedSession && disposedSession.isDirtyInWebview) {
+          console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`)
+          // 自动保存逻辑
+          const codeToSave = disposedSession.currentCode // 使用webview同步过来的最新代码
+          const languageToSave = this.mapVSCodeLanguageIdToOurs(
             this.mapLanguageToVSCode(disposedSession.snippet.language || 'plaintext'), // 假设webview用的也是这个
             disposedSession.snippet.language
-        );
-        const updatedSnippet: CodeSnippet = {
-          ...disposedSession.snippet,
-          code: codeToSave,
-          language: languageToSave,
-        };
-        this.storageManager.updateSnippet(updatedSnippet)
-          .then(() => {
-            this._onDidSaveSnippet.fire(updatedSnippet);
-            console.log(`代码片段 "${updatedSnippet.name}" 已在关闭时自动保存。`);
-          })
-          .catch(error => {
-            console.error(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败:`, error);
-            vscode.window.showErrorMessage(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败。`);
-          });
-      }
-      this.editingWebviews.delete(snippet.id);
-      if (this.editingWebviews.size === 0) {
-        ContextManager.setEditingSnippet(false);
-      }
-    }, null, this.extensionContext.subscriptions);
-
-    panel.webview.onDidReceiveMessage(
-      async message => {
-        console.log('收到WebView消息:', message.type, message.snippetId);
-        
-        const currentSession = this.editingWebviews.get(message.snippetId || snippet.id); 
-        if (!currentSession) {
-            console.warn('Received message for non-existent session:', message.snippetId);
-            return;
+          )
+          const updatedSnippet: CodeSnippet = {
+            ...disposedSession.snippet,
+            code: codeToSave,
+            language: languageToSave,
+          }
+          this.storageManager
+            .updateSnippet(updatedSnippet)
+            .then(() => {
+              this._onDidSaveSnippet.fire(updatedSnippet)
+              console.log(`代码片段 "${updatedSnippet.name}" 已在关闭时自动保存。`)
+            })
+            .catch((error) => {
+              console.error(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败:`, error)
+              vscode.window.showErrorMessage(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败。`)
+            })
         }
-
-        switch (message.type) {
-          case 'ready': 
-            console.log('收到WebView ready消息，准备发送代码片段数据');
-            console.log('代码片段内容长度:', currentSession.currentCode.length);
-            if (currentSession.currentCode) {
-              console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50));
-            }
-            
-            panel.webview.postMessage({
-                type: 'loadSnippet',
-                data: {
-                    code: currentSession.currentCode, 
-                    language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
-                    snippetId: currentSession.snippet.id,
-                }
-            });
-            console.log('已发送loadSnippet消息到WebView');
-            break;
-          case 'saveSnippet':
-            {
-              const codeToSave = message.data.code;
-              const languageFromWebview = message.data.language; 
-              const languageToSave = this.mapVSCodeLanguageIdToOurs(languageFromWebview, currentSession.snippet.language);
-              
-              currentSession.currentCode = codeToSave;
-
-              const updatedSnippet: CodeSnippet = {
-                ...currentSession.snippet,
-                code: codeToSave,
-                language: languageToSave,
-              };
-              try {
-                await this.storageManager.updateSnippet(updatedSnippet);
-                currentSession.snippet = updatedSnippet; 
-                currentSession.lastSavedCode = codeToSave;
-                currentSession.isDirtyInWebview = false; 
-                this._onDidSaveSnippet.fire(updatedSnippet);
-                vscode.window.showInformationMessage(`代码片段 "${updatedSnippet.name}" 已保存。`);
-                panel.webview.postMessage({ type: 'saveSuccess', snippetId: currentSession.snippet.id }); 
-              } catch (error) {
-                console.error('保存代码片段失败 (来自webview):', error);
-                vscode.window.showErrorMessage(`保存代码片段 "${updatedSnippet.name}" 失败。`);
-                panel.webview.postMessage({ type: 'saveError', snippetId: currentSession.snippet.id });
-              }
-              break;
-            }
-          case 'contentChanged': 
-            {
-              currentSession.currentCode = message.data.code;
-              currentSession.isDirtyInWebview = true; 
-              break;
-            }
+        this.editingWebviews.delete(snippet.id)
+        if (this.editingWebviews.size === 0) {
+          ContextManager.setEditingSnippet(false)
         }
       },
       null,
       this.extensionContext.subscriptions
-    );
-    
-    ContextManager.setEditingSnippet(true);
+    )
+
+    panel.webview.onDidReceiveMessage(
+      async (message) => {
+        console.log('收到WebView消息:', message.type, message.snippetId)
+
+        const currentSession = this.editingWebviews.get(message.snippetId || snippet.id)
+        if (!currentSession) {
+          console.warn('Received message for non-existent session:', message.snippetId)
+          return
+        }
+
+        switch (message.type) {
+          case 'ready':
+            console.log('收到WebView ready消息，准备发送代码片段数据')
+            console.log('代码片段内容长度:', currentSession.currentCode.length)
+            if (currentSession.currentCode) {
+              console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50))
+            }
+
+            panel.webview.postMessage({
+              type: 'loadSnippet',
+              data: {
+                code: currentSession.currentCode,
+                language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
+                snippetId: currentSession.snippet.id,
+              },
+            })
+            console.log('已发送loadSnippet消息到WebView')
+            break
+          case 'saveSnippet': {
+            const codeToSave = message.data.code
+            const languageFromWebview = message.data.language
+            const languageToSave = this.mapVSCodeLanguageIdToOurs(languageFromWebview, currentSession.snippet.language)
+
+            currentSession.currentCode = codeToSave
+
+            const updatedSnippet: CodeSnippet = {
+              ...currentSession.snippet,
+              code: codeToSave,
+              language: languageToSave,
+            }
+            try {
+              await this.storageManager.updateSnippet(updatedSnippet)
+              currentSession.snippet = updatedSnippet
+              currentSession.lastSavedCode = codeToSave
+              currentSession.isDirtyInWebview = false
+              this._onDidSaveSnippet.fire(updatedSnippet)
+              vscode.window.showInformationMessage(`代码片段 "${updatedSnippet.name}" 已保存。`)
+              panel.webview.postMessage({ type: 'saveSuccess', snippetId: currentSession.snippet.id })
+            } catch (error) {
+              console.error('保存代码片段失败 (来自webview):', error)
+              vscode.window.showErrorMessage(`保存代码片段 "${updatedSnippet.name}" 失败。`)
+              panel.webview.postMessage({ type: 'saveError', snippetId: currentSession.snippet.id })
+            }
+            break
+          }
+          case 'contentChanged': {
+            currentSession.currentCode = message.data.code
+            currentSession.isDirtyInWebview = true
+            break
+          }
+        }
+      },
+      null,
+      this.extensionContext.subscriptions
+    )
+
+    ContextManager.setEditingSnippet(true)
   }
 
   private mapLanguageToVSCode(language: string): string {
     switch (language.toLowerCase()) {
-      case 'vue': return 'html'; 
-      case 'shell': return 'shellscript';
-      case 'c#': case 'csharp': return 'csharp';
-      case 'c++': case 'cpp': return 'cpp';
-      case 'yaml': case 'yml': return 'yaml';
-      default: return language;
+      case 'vue':
+        return 'html'
+      case 'shell':
+        return 'shellscript'
+      case 'c#':
+      case 'csharp':
+        return 'csharp'
+      case 'c++':
+      case 'cpp':
+        return 'cpp'
+      case 'yaml':
+      case 'yml':
+        return 'yaml'
+      default:
+        return language
     }
   }
-  
+
   private mapVSCodeLanguageIdToOurs(vscodeLangId: string, originalLanguage?: string): string {
     if (originalLanguage) {
-      const lowerOriginal = originalLanguage.toLowerCase();
-      if (vscodeLangId === 'html' && lowerOriginal === 'vue') return 'vue';
-      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') return 'shell';
+      const lowerOriginal = originalLanguage.toLowerCase()
+      if (vscodeLangId === 'html' && lowerOriginal === 'vue') return 'vue'
+      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') return 'shell'
     }
-    if (vscodeLangId === 'shellscript') return 'shell';
-    return vscodeLangId;
+    if (vscodeLangId === 'shellscript') return 'shell'
+    return vscodeLangId
   }
 
   private _getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
-    const extensionUri = this.extensionContext.extensionUri;
-    
+    const extensionUri = this.extensionContext.extensionUri
+
     // 修改monaco路径，指向正确的目录结构
-    const monacoBasePath = vscode.Uri.joinPath(extensionUri, 'dist', 'monaco-editor', 'node_modules', 'monaco-editor', 'min');
-    const monacoLoaderUri = webview.asWebviewUri(vscode.Uri.joinPath(monacoBasePath, 'vs', 'loader.js'));
-    const monacoBaseWebViewUri = webview.asWebviewUri(monacoBasePath);
-    
+    const monacoBasePath = vscode.Uri.joinPath(
+      extensionUri,
+      'dist',
+      'monaco-editor',
+      'node_modules',
+      'monaco-editor',
+      'min'
+    )
+    const monacoLoaderUri = webview.asWebviewUri(vscode.Uri.joinPath(monacoBasePath, 'vs', 'loader.js'))
+    const monacoBaseWebViewUri = webview.asWebviewUri(monacoBasePath)
+
     // 日志记录初始代码片段内容是否为空
-    console.log(`初始化WebView，代码片段[${snippet.id}]内容${snippet.code ? '非空' : '为空'}`);
+    console.log(`初始化WebView，代码片段[${snippet.id}]内容${snippet.code ? '非空' : '为空'}`)
     if (snippet.code) {
-      console.log(`代码片段内容前50个字符: "${snippet.code.substring(0, 50)}..."`);
+      console.log(`代码片段内容前50个字符: "${snippet.code.substring(0, 50)}..."`)
     }
 
-    const nonce = this.getNonce();
+    const nonce = this.getNonce()
 
     return `<!DOCTYPE html>
       <html lang="en">
@@ -516,101 +555,101 @@ export class SnippetEditor {
                     
                     // 更新配置
                     require.config({ paths: { 'vs': currentPath } });
-                    
-                    window.MonacoEnvironment = {
-                      getWorkerUrl: function (moduleId, label) {
+                
+                window.MonacoEnvironment = {
+                    getWorkerUrl: function (moduleId, label) {
                         const workerPath = currentPath + '/base/worker/workerMain.js';
                         debugLog('Worker URL: ' + workerPath);
                         return workerPath;
-                      }
-                    };
-                    
+                    }
+                };
+
                     // 尝试加载
-                    require(['vs/editor/editor.main'], function () {
+                require(['vs/editor/editor.main'], function () {
                       debugLog('Monaco成功加载，使用路径: ' + currentPath);
                       // 继续使用现有的编辑器创建逻辑
-                      if (editor) { 
-                        debugLog('销毁现有编辑器');
-                        editor.dispose(); 
+                  if (editor) { 
+                    debugLog('销毁现有编辑器');
+                    editor.dispose(); 
+                  }
+                  
+                  try {
+                    debugLog('创建 Monaco 编辑器实例');
+                    const editorContainer = document.getElementById('editor-container');
+                    if (!editorContainer) {
+                      debugLog('错误: 找不到编辑器容器元素!');
+                      return;
+                    }
+                    
+                    debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
+                    
+                    // 保存初始代码内容以便于记录
+                    const initialCode = message.data.code || '';
+                    debugLog('初始代码内容长度: ' + initialCode.length);
+                    if (initialCode.length > 0) {
+                      debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
+                    } else {
+                      debugLog('警告: 初始代码内容为空!');
+                    }
+                    
+                    editor = monaco.editor.create(editorContainer, {
+                      value: initialCode,
+                      language: currentLanguage,
+                      theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
+                      automaticLayout: true,
+                      wordWrap: 'on',
+                      minimap: { enabled: true },
+                      scrollbar: {
+                          useShadows: false,
+                          verticalScrollbarSize: 10,
+                          horizontalScrollbarSize: 10
                       }
-                      
-                      try {
-                        debugLog('创建 Monaco 编辑器实例');
-                        const editorContainer = document.getElementById('editor-container');
-                        if (!editorContainer) {
-                          debugLog('错误: 找不到编辑器容器元素!');
-                          return;
-                        }
-                        
-                        debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
-                        
-                        // 保存初始代码内容以便于记录
-                        const initialCode = message.data.code || '';
-                        debugLog('初始代码内容长度: ' + initialCode.length);
-                        if (initialCode.length > 0) {
-                          debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
-                        } else {
-                          debugLog('警告: 初始代码内容为空!');
-                        }
-                        
-                        editor = monaco.editor.create(editorContainer, {
-                          value: initialCode,
-                          language: currentLanguage,
-                          theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
-                          automaticLayout: true,
-                          wordWrap: 'on',
-                          minimap: { enabled: true },
-                          scrollbar: {
-                              useShadows: false,
-                              verticalScrollbarSize: 10,
-                              horizontalScrollbarSize: 10
-                          }
-                        });
-                        
-                        debugLog('Monaco 编辑器实例创建成功');
-                        
-                        // 验证编辑器的值是否正确设置
-                        setTimeout(() => {
-                          const currentValue = editor.getValue();
-                          debugLog('编辑器内容长度(延迟检查): ' + currentValue.length);
-                          if (currentValue.length === 0 && initialCode.length > 0) {
-                            debugLog('警告: 编辑器内容为空，但初始代码不为空!');
-                          }
-                        }, 500);
-                      } catch (error) {
-                        debugLog('创建编辑器实例出错: ' + error.toString());
-                        console.error('创建编辑器错误:', error);
+                    });
+                    
+                    debugLog('Monaco 编辑器实例创建成功');
+                    
+                    // 验证编辑器的值是否正确设置
+                    setTimeout(() => {
+                      const currentValue = editor.getValue();
+                      debugLog('编辑器内容长度(延迟检查): ' + currentValue.length);
+                      if (currentValue.length === 0 && initialCode.length > 0) {
+                        debugLog('警告: 编辑器内容为空，但初始代码不为空!');
                       }
+                    }, 500);
+                  } catch (error) {
+                    debugLog('创建编辑器实例出错: ' + error.toString());
+                    console.error('创建编辑器错误:', error);
+                  }
 
-                      try {
-                        debugLog('设置编辑器事件监听器');
-                        editor.onDidChangeModelContent(() => {
-                          internalDirtyFlag = true;
-                          vscode.postMessage({ 
-                              type: 'contentChanged', 
-                              snippetId: currentSnippetId, 
-                              data: { 
-                                code: editor.getValue(),
-                                language: currentLanguage
-                              } 
-                          });
-                          updateStatus('未保存的更改');
-                          debugLog('内容已更改，已发送 contentChanged 消息');
-                        });
+                  try {
+                    debugLog('设置编辑器事件监听器');
+                    editor.onDidChangeModelContent(() => {
+                      internalDirtyFlag = true;
+                      vscode.postMessage({ 
+                          type: 'contentChanged', 
+                          snippetId: currentSnippetId, 
+                          data: { 
+                            code: editor.getValue(),
+                            language: currentLanguage
+                          } 
+                      });
+                      updateStatus('未保存的更改');
+                      debugLog('内容已更改，已发送 contentChanged 消息');
+                    });
 
-                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
-                          debugLog('检测到 Ctrl+S 快捷键');
-                          if (!saveInProgress) saveContent();
-                        });
-                        debugLog('编辑器事件监听器设置完成');
-                      } catch (error) {
-                        debugLog('设置事件监听器出错: ' + error.toString());
-                      }
-                    }, function(error) {
+                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
+                      debugLog('检测到 Ctrl+S 快捷键');
+                      if (!saveInProgress) saveContent();
+                    });
+                    debugLog('编辑器事件监听器设置完成');
+                  } catch (error) {
+                    debugLog('设置事件监听器出错: ' + error.toString());
+                  }
+                }, function(error) {
                       debugLog('路径 ' + currentPath + ' 加载失败: ' + JSON.stringify(error));
                       // 尝试下一个路径
                       setTimeout(() => tryLoadMonaco(pathIndex + 1), 100);
-                    });
+                });
                   }
                   
                   // 开始尝试加载
@@ -671,7 +710,6 @@ export class SnippetEditor {
 
         </script>
       </body>
-      </html>`;
+      </html>`
   }
 }
-

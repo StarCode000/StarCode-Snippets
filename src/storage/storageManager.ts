@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { CodeSnippet, Directory } from '../models/types'
+import { CodeSnippet, Directory } from '../types/types'
 
 export class StorageManager {
   private context: vscode.ExtensionContext
@@ -10,7 +10,7 @@ export class StorageManager {
   private writeQueue: Array<() => Promise<void>> = []
   private readonly maxRetries = 3
   private readonly retryDelay = 1000 // 1秒
-  
+
   // 添加缓存
   private snippetsCache: CodeSnippet[] | null = null
   private directoriesCache: Directory[] | null = null
@@ -45,7 +45,7 @@ export class StorageManager {
       } catch {
         await vscode.workspace.fs.writeFile(this.directoriesFile, Buffer.from(JSON.stringify([], null, 2)))
       }
-      
+
       // 预加载缓存
       this.preloadCache()
     } catch (error) {
@@ -53,15 +53,12 @@ export class StorageManager {
       throw error
     }
   }
-  
+
   // 预加载缓存方法
   private preloadCache() {
     setTimeout(async () => {
       try {
-        await Promise.all([
-          this.getAllSnippets(),
-          this.getAllDirectories()
-        ])
+        await Promise.all([this.getAllSnippets(), this.getAllDirectories()])
       } catch (error) {
         console.error('预加载缓存失败:', error)
       }
@@ -96,17 +93,16 @@ export class StorageManager {
   // 共享读取承诺，防止并发读取同一文件
   private getFileReadPromise(file: vscode.Uri, retries = this.maxRetries): Promise<any> {
     const fileKey = file.toString()
-    
+
     const existingPromise = this.fileReadPromises.get(fileKey)
     if (existingPromise) {
       return existingPromise
     }
 
-    const promise = this.readFileWithRetry(file, retries)
-      .finally(() => {
-        this.fileReadPromises.delete(fileKey)
-      })
-    
+    const promise = this.readFileWithRetry(file, retries).finally(() => {
+      this.fileReadPromises.delete(fileKey)
+    })
+
     this.fileReadPromises.set(fileKey, promise)
     return promise
   }
@@ -140,11 +136,11 @@ export class StorageManager {
       }
 
       await vscode.workspace.fs.rename(tempFile, file, { overwrite: true })
-      
+
       // 更新缓存并清除读取Promise缓存
       const fileKey = file.toString()
       this.fileReadPromises.delete(fileKey)
-      
+
       if (file.path.includes('snippets.json')) {
         this.snippetsCache = data
         this.lastSnippetsRead = Date.now()
@@ -172,21 +168,28 @@ export class StorageManager {
   public async getAllSnippets(): Promise<CodeSnippet[]> {
     try {
       const now = Date.now()
-      if (this.snippetsCache && (now - this.lastSnippetsRead < this.cacheLifetime)) {
+      if (this.snippetsCache && now - this.lastSnippetsRead < this.cacheLifetime) {
         console.log(`StorageManager: 使用缓存返回 ${this.snippetsCache.length} 个代码片段`)
         return this.snippetsCache
       }
-      
+
       const snippets = await this.getFileReadPromise(this.snippetsFile)
-      
+
       this.snippetsCache = snippets
       this.lastSnippetsRead = now
-      
+
       console.log(`StorageManager: 从文件读取 ${snippets.length} 个代码片段`)
       if (snippets.length > 0) {
-        console.log('代码片段列表:', JSON.stringify(snippets.map((s: CodeSnippet) => ({ id: s.id, name: s.name, parentId: s.parentId })), null, 2))
+        console.log(
+          '代码片段列表:',
+          JSON.stringify(
+            snippets.map((s: CodeSnippet) => ({ id: s.id, name: s.name, parentId: s.parentId })),
+            null,
+            2
+          )
+        )
       }
-      
+
       return snippets
     } catch (error) {
       console.error('读取代码片段失败:', error)
@@ -198,15 +201,15 @@ export class StorageManager {
   public async getAllDirectories(): Promise<Directory[]> {
     try {
       const now = Date.now()
-      if (this.directoriesCache && (now - this.lastDirectoriesRead < this.cacheLifetime)) {
+      if (this.directoriesCache && now - this.lastDirectoriesRead < this.cacheLifetime) {
         return this.directoriesCache
       }
-      
+
       const directories = await this.getFileReadPromise(this.directoriesFile)
-      
+
       this.directoriesCache = directories
       this.lastDirectoriesRead = now
-      
+
       return directories
     } catch (error) {
       console.error('读取目录失败:', error)
@@ -231,14 +234,14 @@ export class StorageManager {
   public async updateSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const index = snippets.findIndex(s => s.id === snippet.id)
-      
+      const index = snippets.findIndex((s) => s.id === snippet.id)
+
       if (index === -1) {
         throw new Error(`代码片段不存在: ${snippet.id}`)
       }
 
       const existing = snippets[index]
-      
+
       if (!this.hasSnippetChanged(existing, snippet)) {
         console.log(`代码片段无变化，跳过更新: ${snippet.name}`)
         return
@@ -257,8 +260,8 @@ export class StorageManager {
   public async deleteSnippet(id: string): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const index = snippets.findIndex(s => s.id === id)
-      
+      const index = snippets.findIndex((s) => s.id === id)
+
       if (index === -1) {
         throw new Error(`代码片段不存在: ${id}`)
       }
@@ -290,14 +293,14 @@ export class StorageManager {
   public async updateDirectory(directory: Directory): Promise<void> {
     try {
       const directories = await this.getAllDirectories()
-      const index = directories.findIndex(d => d.id === directory.id)
-      
+      const index = directories.findIndex((d) => d.id === directory.id)
+
       if (index === -1) {
         throw new Error(`目录不存在: ${directory.id}`)
       }
 
       const existing = directories[index]
-      
+
       if (!this.hasDirectoryChanged(existing, directory)) {
         console.log(`目录无变化，跳过更新: ${directory.name}`)
         return
@@ -315,12 +318,9 @@ export class StorageManager {
   // 删除目录
   public async deleteDirectory(id: string): Promise<void> {
     try {
-      const [directories, snippets] = await Promise.all([
-        this.getAllDirectories(),
-        this.getAllSnippets()
-      ])
-      
-      const directoryIndex = directories.findIndex(d => d.id === id)
+      const [directories, snippets] = await Promise.all([this.getAllDirectories(), this.getAllSnippets()])
+
+      const directoryIndex = directories.findIndex((d) => d.id === id)
       if (directoryIndex === -1) {
         throw new Error(`目录不存在: ${id}`)
       }
@@ -329,31 +329,31 @@ export class StorageManager {
 
       // 递归删除子目录和代码片段
       const toDelete = this.findAllChildItems(id, directories, snippets)
-      
+
       // 删除所有子项目
       for (const item of toDelete.snippets) {
-        const snippetIndex = snippets.findIndex(s => s.id === item.id)
+        const snippetIndex = snippets.findIndex((s) => s.id === item.id)
         if (snippetIndex >= 0) {
           snippets.splice(snippetIndex, 1)
         }
       }
-      
+
       for (const item of toDelete.directories) {
-        const dirIndex = directories.findIndex(d => d.id === item.id)
+        const dirIndex = directories.findIndex((d) => d.id === item.id)
         if (dirIndex >= 0) {
           directories.splice(dirIndex, 1)
         }
       }
-      
+
       // 删除目录本身
       directories.splice(directoryIndex, 1)
-      
+
       // 保存更改
       await Promise.all([
         this.writeFileWithRetry(this.directoriesFile, directories),
-        this.writeFileWithRetry(this.snippetsFile, snippets)
+        this.writeFileWithRetry(this.snippetsFile, snippets),
       ])
-      
+
       console.log(`目录及其内容已删除: ${deletedDirectory.name}`)
     } catch (error) {
       console.error('删除目录失败:', error)
@@ -362,25 +362,29 @@ export class StorageManager {
   }
 
   // 递归查找所有子项目
-  private findAllChildItems(parentId: string, directories: Directory[], snippets: CodeSnippet[]): {
+  private findAllChildItems(
+    parentId: string,
+    directories: Directory[],
+    snippets: CodeSnippet[]
+  ): {
     directories: Directory[]
     snippets: CodeSnippet[]
   } {
-    const childDirectories = directories.filter(d => d.parentId === parentId)
-    const childSnippets = snippets.filter(s => s.parentId === parentId)
-    
+    const childDirectories = directories.filter((d) => d.parentId === parentId)
+    const childSnippets = snippets.filter((s) => s.parentId === parentId)
+
     let allChildDirectories = [...childDirectories]
     let allChildSnippets = [...childSnippets]
-    
+
     for (const childDir of childDirectories) {
       const grandChildren = this.findAllChildItems(childDir.id, directories, snippets)
       allChildDirectories.push(...grandChildren.directories)
       allChildSnippets.push(...grandChildren.snippets)
     }
-    
+
     return {
       directories: allChildDirectories,
-      snippets: allChildSnippets
+      snippets: allChildSnippets,
     }
   }
 
@@ -404,16 +408,21 @@ export class StorageManager {
 
   // 检查代码片段是否有变化
   private hasSnippetChanged(existing: CodeSnippet, updated: CodeSnippet): boolean {
-    return existing.name !== updated.name ||
-           existing.code !== updated.code ||
-           existing.language !== updated.language ||
-           existing.parentId !== updated.parentId
+    return (
+      existing.name !== updated.name ||
+      existing.code !== updated.code ||
+      existing.language !== updated.language ||
+      existing.parentId !== updated.parentId
+    )
   }
 
   // 检查目录是否有变化
   private hasDirectoryChanged(existing: Directory, updated: Directory): boolean {
-    return existing.name !== updated.name ||
-           existing.parentId !== updated.parentId ||
-           existing.order !== updated.order
+    return existing.name !== updated.name || existing.parentId !== updated.parentId || existing.order !== updated.order
   }
-} 
+
+  // 获取扩展上下文
+  public getContext(): vscode.ExtensionContext {
+    return this.context
+  }
+}

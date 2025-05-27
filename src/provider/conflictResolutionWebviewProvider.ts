@@ -1,16 +1,15 @@
-import * as vscode from 'vscode';
-import { CodeSnippet } from '../models/types';
-import { ConflictInfo } from '../utils/diffMergeManager';
+import * as vscode from 'vscode'
+import { CodeSnippet } from '../types/types'
+import { ConflictInfo } from '../utils/diffMergeManager'
 
 export class ConflictResolutionWebviewProvider {
-  private static currentPanel: vscode.WebviewPanel | undefined;
+  private static currentPanel: vscode.WebviewPanel | undefined
 
   public static async showConflictResolution(
     conflicts: ConflictInfo[],
     localSnippet: CodeSnippet,
     remoteSnippet: CodeSnippet
   ): Promise<CodeSnippet | null> {
-    
     return new Promise((resolve) => {
       const panel = vscode.window.createWebviewPanel(
         'conflictResolution',
@@ -18,35 +17,33 @@ export class ConflictResolutionWebviewProvider {
         vscode.ViewColumn.One,
         {
           enableScripts: true,
-          retainContextWhenHidden: true
+          retainContextWhenHidden: true,
         }
-      );
+      )
 
-      this.currentPanel = panel;
+      this.currentPanel = panel
 
-      panel.webview.html = this.getWebviewContent(conflicts, localSnippet, remoteSnippet);
+      panel.webview.html = this.getWebviewContent(conflicts, localSnippet, remoteSnippet)
 
       // 处理来自webview的消息
-      panel.webview.onDidReceiveMessage(
-        message => {
-          switch (message.type) {
-            case 'resolveConflict':
-              resolve(message.result);
-              panel.dispose();
-              break;
-            case 'cancel':
-              resolve(null);
-              panel.dispose();
-              break;
-          }
+      panel.webview.onDidReceiveMessage((message) => {
+        switch (message.type) {
+          case 'resolveConflict':
+            resolve(message.result)
+            panel.dispose()
+            break
+          case 'cancel':
+            resolve(null)
+            panel.dispose()
+            break
         }
-      );
+      })
 
       panel.onDidDispose(() => {
-        this.currentPanel = undefined;
-        resolve(null);
-      });
-    });
+        this.currentPanel = undefined
+        resolve(null)
+      })
+    })
   }
 
   private static getWebviewContent(
@@ -241,10 +238,15 @@ export class ConflictResolutionWebviewProvider {
         <p>代码片段 "<strong>${localSnippet.name}</strong>" 在本地和远程都有修改，请选择解决方式。</p>
     </div>
 
-    ${conflicts.filter(c => c.field !== 'code').length > 0 ? `
+    ${
+      conflicts.filter((c) => c.field !== 'code').length > 0
+        ? `
     <div class="field-conflicts">
         <h3>字段冲突</h3>
-        ${conflicts.filter(c => c.field !== 'code').map(conflict => `
+        ${conflicts
+          .filter((c) => c.field !== 'code')
+          .map(
+            (conflict) => `
         <div class="field-conflict">
             <div class="field-conflict-name">${conflict.field}</div>
             <div class="field-values">
@@ -258,11 +260,17 @@ export class ConflictResolutionWebviewProvider {
                 </div>
             </div>
         </div>
-        `).join('')}
+        `
+          )
+          .join('')}
     </div>
-    ` : ''}
+    `
+        : ''
+    }
 
-    ${conflicts.some(c => c.field === 'code') ? `
+    ${
+      conflicts.some((c) => c.field === 'code')
+        ? `
     <div class="conflict-item">
         <div class="conflict-field">代码内容冲突</div>
         <div class="conflict-comparison">
@@ -280,17 +288,25 @@ export class ConflictResolutionWebviewProvider {
     <div class="merge-editor">
         <div class="merge-editor-header">手动合并编辑器</div>
         <div class="merge-editor-content">
-            <textarea id="mergeEditor" placeholder="在此编辑合并后的代码...">${this.escapeHtml(localSnippet.code)}</textarea>
+            <textarea id="mergeEditor" placeholder="在此编辑合并后的代码...">${this.escapeHtml(
+              localSnippet.code
+            )}</textarea>
         </div>
     </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <div class="action-buttons">
         <button class="btn btn-primary" onclick="useLocal()">保留本地版本</button>
         <button class="btn btn-primary" onclick="useRemote()">保留远程版本</button>
-        ${conflicts.some(c => c.field === 'code') ? `
+        ${
+          conflicts.some((c) => c.field === 'code')
+            ? `
         <button class="btn btn-primary" onclick="useManualMerge()">使用手动合并</button>
-        ` : ''}
+        `
+            : ''
+        }
         <button class="btn btn-secondary" onclick="cancel()">跳过</button>
     </div>
 
@@ -317,9 +333,10 @@ export class ConflictResolutionWebviewProvider {
                 ...${JSON.stringify(localSnippet)},
                 code: mergedCode,
                 // 对于字段冲突，使用远程值作为默认
-                ${conflicts.filter(c => c.field !== 'code').map(c => 
-                  `${c.field}: ${JSON.stringify(c.remoteValue)}`
-                ).join(',\n                ')}
+                ${conflicts
+                  .filter((c) => c.field !== 'code')
+                  .map((c) => `${c.field}: ${JSON.stringify(c.remoteValue)}`)
+                  .join(',\n                ')}
             };
             
             vscode.postMessage({
@@ -335,7 +352,7 @@ export class ConflictResolutionWebviewProvider {
         }
     </script>
 </body>
-</html>`;
+</html>`
   }
 
   private static escapeHtml(text: string): string {
@@ -344,6 +361,6 @@ export class ConflictResolutionWebviewProvider {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/'/g, '&#39;')
   }
 }

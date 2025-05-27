@@ -125,12 +125,6 @@
         "icon": "$(link-external)"
       },
       {
-        "command": "starcode-snippets.selectExportFormat",
-        "title": "选择导出格式",
-        "category": "StarCode Snippets",
-        "icon": "$(versions)"
-      },
-      {
         "command": "starcode-snippets.importSnippets",
         "title": "导入代码片段",
         "category": "StarCode Snippets",
@@ -248,11 +242,6 @@
           "command": "starcode-snippets.exportAll",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
-        },
-        {
-          "command": "starcode-snippets.selectExportFormat",
-          "when": "view == starCodeSnippetsExplorer",
-          "group": "navigation@7"
         }
       ],
       "view/item/context": [
@@ -469,6 +458,12 @@
               "description": "是否正在同步"
             }
           }
+        },
+        "starcode-snippets.storageVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"],
+          "default": "v2",
+          "description": "存储数据格式版本"
         }
       }
     }

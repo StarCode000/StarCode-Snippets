@@ -46,14 +46,14 @@ export type Directory = DirectoryV1
 
 // ===== 导出数据格式 =====
 export interface ExportDataV1 {
-  version: "1.0.0"
+  version: '1.0.0'
   exportDate: string
   directories: DirectoryV1[]
   snippets: CodeSnippetV1[]
 }
 
 export interface ExportDataV2 {
-  version: "2.0.0"
+  version: '2.0.0'
   exportDate: string
   directories: DirectoryV2[]
   snippets: CodeSnippetV2[]

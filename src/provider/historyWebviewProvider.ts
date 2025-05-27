@@ -1,29 +1,28 @@
-import * as vscode from 'vscode';
-import { CloudSyncManager } from '../utils/cloudSyncManager';
-import { ChangelogManager, HistoryEntry, OperationType } from '../utils/changelogManager';
-import { SettingsManager } from '../utils/settingsManager';
-import { StorageManager } from '../storage/storageManager';
+import * as vscode from 'vscode'
+import { CloudSyncManager } from '../utils/cloudSyncManager'
+import { ChangelogManager, HistoryEntry, OperationType } from '../utils/changelogManager'
+import { SettingsManager } from '../utils/settingsManager'
+import { StorageManager } from '../storage/storageManager'
 
 // 扩展历史记录条目，添加数据源信息
 interface ExtendedHistoryEntry extends HistoryEntry {
-  source?: 'local' | 'remote' | 'synced';
+  source?: 'local' | 'remote' | 'synced'
+  _originalIndex: number
 }
 
 export class HistoryWebviewProvider {
-  public static readonly viewType = 'starcode-snippets.history';
-  private static currentPanel: vscode.WebviewPanel | undefined;
+  public static readonly viewType = 'starcode-snippets.history'
+  private static currentPanel: vscode.WebviewPanel | undefined
 
   private constructor() {}
 
   public static createOrShow(extensionUri: vscode.Uri) {
-    const column = vscode.window.activeTextEditor
-      ? vscode.window.activeTextEditor.viewColumn
-      : undefined;
+    const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined
 
     // 如果已经有历史记录面板打开，就激活它
     if (HistoryWebviewProvider.currentPanel) {
-      HistoryWebviewProvider.currentPanel.reveal(column);
-      return;
+      HistoryWebviewProvider.currentPanel.reveal(column)
+      return
     }
 
     // 创建新的WebView面板
@@ -34,94 +33,94 @@ export class HistoryWebviewProvider {
       {
         enableScripts: true,
         localResourceRoots: [extensionUri],
-        retainContextWhenHidden: true
+        retainContextWhenHidden: true,
       }
-    );
+    )
 
-    HistoryWebviewProvider.currentPanel = panel;
-    const provider = new HistoryWebviewProvider();
-    provider._setupWebview(panel, extensionUri);
+    HistoryWebviewProvider.currentPanel = panel
+    const provider = new HistoryWebviewProvider()
+    provider._setupWebview(panel, extensionUri)
 
     // 当面板被关闭时，清理引用
     panel.onDidDispose(() => {
-      HistoryWebviewProvider.currentPanel = undefined;
-    }, null);
+      HistoryWebviewProvider.currentPanel = undefined
+    }, null)
   }
 
   private _setupWebview(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-    panel.webview.html = this._getHtmlForWebview(panel.webview, extensionUri);
+    panel.webview.html = this._getHtmlForWebview(panel.webview, extensionUri)
 
     // 处理来自webview的消息
     panel.webview.onDidReceiveMessage(async (data) => {
       switch (data.type) {
         case 'loadHistory':
-          await this._loadHistory(panel);
-          break;
+          await this._loadHistory(panel)
+          break
         case 'refreshHistory':
-          await this._refreshHistory(panel);
-          break;
+          await this._refreshHistory(panel)
+          break
         case 'downloadHistory':
-          await this._downloadHistory(panel);
-          break;
+          await this._downloadHistory(panel)
+          break
         case 'viewRawHistory':
-          await this._viewRawHistory(panel);
-          break;
+          await this._viewRawHistory(panel)
+          break
         case 'abandonLocalAndImport':
-          await this._abandonLocalAndImport(panel);
-          break;
+          await this._abandonLocalAndImport(panel)
+          break
       }
-    });
+    })
 
     // 初始加载历史记录
-    this._loadHistory(panel);
+    this._loadHistory(panel)
   }
 
   private async _loadHistory(panel: vscode.WebviewPanel) {
     try {
       panel.webview.postMessage({
         type: 'loading',
-        message: '正在加载历史记录...'
-      });
+        message: '正在加载历史记录...',
+      })
 
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
-      const cloudSyncManager = new CloudSyncManager(context);
-      
+      const cloudSyncManager = new CloudSyncManager(context)
+
       if (!cloudSyncManager.isConfigured()) {
         panel.webview.postMessage({
           type: 'error',
-          message: '云端同步未配置，无法加载历史记录'
-        });
-        return;
+          message: '云端同步未配置，无法加载历史记录',
+        })
+        return
       }
 
       // 获取本地历史记录
-      const localHistory = context.globalState.get('cloudSync.lastHistory', '');
-      
+      const localHistory = context.globalState.get('cloudSync.lastHistory', '')
+
       // 尝试获取云端历史记录
-      let remoteHistory = '';
+      let remoteHistory = ''
       try {
-        const remoteCheck = await cloudSyncManager.checkRemoteUpdates();
+        const remoteCheck = await cloudSyncManager.checkRemoteUpdates()
         if (remoteCheck.remoteHistory) {
-          remoteHistory = remoteCheck.remoteHistory;
+          remoteHistory = remoteCheck.remoteHistory
         }
       } catch (error) {
-        console.warn('无法获取云端历史记录:', error);
+        console.warn('无法获取云端历史记录:', error)
       }
 
       // 解析历史记录
-      const localEntries = this._parseHistory(localHistory);
-      const remoteEntries = this._parseHistory(remoteHistory);
-      
+      const localEntries = this._parseHistory(localHistory)
+      const remoteEntries = this._parseHistory(remoteHistory)
+
       // 合并并去重历史记录
-      const allEntries = this._mergeHistories(localEntries, remoteEntries);
-      
+      const allEntries = this._mergeHistories(localEntries, remoteEntries)
+
       // 获取同步状态
-      const syncStatus = SettingsManager.getCloudSyncStatus();
-      const syncConfig = SettingsManager.getCloudSyncConfig();
+      const syncStatus = SettingsManager.getCloudSyncStatus()
+      const syncConfig = SettingsManager.getCloudSyncConfig()
 
       panel.webview.postMessage({
         type: 'historyData',
@@ -130,98 +129,95 @@ export class HistoryWebviewProvider {
           syncStatus,
           syncConfig: {
             endpoint: syncConfig.endpoint,
-            bucket: syncConfig.bucket
+            bucket: syncConfig.bucket,
           },
-          stats: this._generateStats(allEntries)
-        }
-      });
-
+          stats: this._generateStats(allEntries),
+        },
+      })
     } catch (error) {
-      console.error('加载历史记录失败:', error);
+      console.error('加载历史记录失败:', error)
       panel.webview.postMessage({
         type: 'error',
-        message: `加载历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`
-      });
+        message: `加载历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      })
     }
   }
 
   private async _refreshHistory(panel: vscode.WebviewPanel) {
-    await this._loadHistory(panel);
+    await this._loadHistory(panel)
   }
 
   private async _downloadHistory(panel: vscode.WebviewPanel) {
     try {
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
-      const localHistory = context.globalState.get('cloudSync.lastHistory', '');
-      
+      const localHistory = context.globalState.get('cloudSync.lastHistory', '')
+
       if (!localHistory) {
-        vscode.window.showWarningMessage('没有历史记录可以下载');
-        return;
+        vscode.window.showWarningMessage('没有历史记录可以下载')
+        return
       }
 
       const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file('sync-history.txt'),
         filters: {
           'Text files': ['txt'],
-          'All files': ['*']
-        }
-      });
+          'All files': ['*'],
+        },
+      })
 
       if (uri) {
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(localHistory, 'utf8'));
-        vscode.window.showInformationMessage(`历史记录已保存到: ${uri.fsPath}`);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(localHistory, 'utf8'))
+        vscode.window.showInformationMessage(`历史记录已保存到: ${uri.fsPath}`)
       }
-
     } catch (error) {
-      console.error('下载历史记录失败:', error);
-      vscode.window.showErrorMessage(`下载历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      console.error('下载历史记录失败:', error)
+      vscode.window.showErrorMessage(`下载历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
   }
-  
+
   /**
    * 查看原始历史记录内容
    */
   private async _viewRawHistory(panel: vscode.WebviewPanel) {
     try {
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
       // 获取本地历史记录
-      const localHistory = context.globalState.get('cloudSync.lastHistory', '');
-      
+      const localHistory = context.globalState.get('cloudSync.lastHistory', '')
+
       // 尝试获取云端历史记录
-      let remoteHistory = '';
+      let remoteHistory = ''
       try {
-        const cloudSyncManager = new CloudSyncManager(context);
-        const remoteCheck = await cloudSyncManager.checkRemoteUpdates();
+        const cloudSyncManager = new CloudSyncManager(context)
+        const remoteCheck = await cloudSyncManager.checkRemoteUpdates()
         if (remoteCheck.remoteHistory) {
-          remoteHistory = remoteCheck.remoteHistory;
+          remoteHistory = remoteCheck.remoteHistory
         }
       } catch (error) {
-        console.warn('无法获取云端历史记录:', error);
+        console.warn('无法获取云端历史记录:', error)
       }
-      
+
       // 发送原始历史记录内容
       panel.webview.postMessage({
         type: 'rawHistoryData',
         data: {
           local: localHistory,
-          remote: remoteHistory
-        }
-      });
-      
+          remote: remoteHistory,
+        },
+      })
     } catch (error) {
-      console.error('查看原始历史记录失败:', error);
+      console.error('查看原始历史记录失败:', error)
       panel.webview.postMessage({
         type: 'error',
-        message: `查看原始历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`
-      });
+        message: `查看原始历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      })
     }
   }
 
@@ -238,117 +234,116 @@ export class HistoryWebviewProvider {
 本地的所有未同步更改将丢失！
 请确保您了解此操作的后果。
 
-是否继续？`;
+是否继续？`
 
       const choice = await vscode.window.showWarningMessage(
         warningMessage,
         { modal: true },
         '我了解风险，继续执行',
         '取消'
-      );
+      )
 
       if (choice !== '我了解风险，继续执行') {
         panel.webview.postMessage({
           type: 'abandonLocalResult',
           success: false,
-          message: '用户取消了操作'
-        });
-        return;
+          message: '用户取消了操作',
+        })
+        return
       }
 
       // 发送开始操作消息
       panel.webview.postMessage({
         type: 'abandonLocalStarted',
-        message: '正在从云端导入数据...'
-      });
+        message: '正在从云端导入数据...',
+      })
 
       // 获取扩展上下文
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
       // 创建存储管理器实例
-      const storageManager = new StorageManager(context);
-      const cloudSyncManager = new CloudSyncManager(context, storageManager);
-      
+      const storageManager = new StorageManager(context)
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
       if (!cloudSyncManager.isConfigured()) {
-        throw new Error('云端同步未配置，请先完成配置');
+        throw new Error('云端同步未配置，请先完成配置')
       }
 
       // 执行放弃本地并从云端导入
-      const result = await cloudSyncManager.abandonLocalAndImportFromCloud();
-      
+      const result = await cloudSyncManager.abandonLocalAndImportFromCloud()
+
       // 发送结果消息
       panel.webview.postMessage({
         type: 'abandonLocalResult',
         success: result.success,
-        message: result.message
-      });
+        message: result.message,
+      })
 
       if (result.success) {
-        vscode.window.showInformationMessage(`✅ ${result.message}`);
-        
-        // 刷新树视图以显示导入的代码片段
-        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
-        
-        // 重新加载历史记录
-        await this._loadHistory(panel);
-      } else {
-        vscode.window.showWarningMessage(`⚠️ ${result.message}`);
-      }
+        vscode.window.showInformationMessage(`✅ ${result.message}`)
 
+        // 刷新树视图以显示导入的代码片段
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
+
+        // 重新加载历史记录
+        await this._loadHistory(panel)
+      } else {
+        vscode.window.showWarningMessage(`⚠️ ${result.message}`)
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '从云端导入失败';
-      
+      const errorMessage = error instanceof Error ? error.message : '从云端导入失败'
+
       panel.webview.postMessage({
         type: 'abandonLocalResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`);
+      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`)
     }
   }
 
   private _parseHistory(historyText: string): HistoryEntry[] {
     if (!historyText.trim()) {
-      return [];
+      return []
     }
 
     try {
-      return ChangelogManager.parseHistory(historyText);
+      return ChangelogManager.parseHistory(historyText)
     } catch (error) {
-      console.error('解析历史记录失败:', error);
-      return [];
+      console.error('解析历史记录失败:', error)
+      return []
     }
   }
 
   private _mergeHistories(local: HistoryEntry[], remote: HistoryEntry[]): ExtendedHistoryEntry[] {
-    const merged = new Map<string, ExtendedHistoryEntry>();
-    
+    const merged = new Map<string, ExtendedHistoryEntry>()
+    // 添加一个索引属性，记录原始顺序
+    let index = 0
+
     // 添加本地记录
-    local.forEach(entry => {
-      const key = `${entry.timestamp}-${entry.fullPath}-${entry.operation}`;
-      merged.set(key, { ...entry, source: 'local' });
-    });
-    
+    local.forEach((entry) => {
+      const key = `${entry.timestamp}-${entry.fullPath}-${entry.operation}`
+      merged.set(key, { ...entry, source: 'local', _originalIndex: index++ })
+    })
+
     // 添加远程记录
-    remote.forEach(entry => {
-      const key = `${entry.timestamp}-${entry.fullPath}-${entry.operation}`;
+    remote.forEach((entry) => {
+      const key = `${entry.timestamp}-${entry.fullPath}-${entry.operation}`
       if (merged.has(key)) {
         // 如果已存在，标记为已同步
-        const existing = merged.get(key)!;
-        existing.source = 'synced';
+        const existing = merged.get(key)!
+        existing.source = 'synced'
       } else {
-        merged.set(key, { ...entry, source: 'remote' });
+        merged.set(key, { ...entry, source: 'remote', _originalIndex: index++ })
       }
-    });
-    
-    // 按时间戳排序（最新的在前）
-    return Array.from(merged.values()).sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    })
+
+    // 按原始索引降序排列（保持原始顺序，但是倒序展示）
+    return Array.from(merged.values()).sort((a, b) => (b as any)._originalIndex - (a as any)._originalIndex)
   }
 
   private _generateStats(entries: ExtendedHistoryEntry[]) {
@@ -364,49 +359,49 @@ export class HistoryWebviewProvider {
       remoteChanges: 0,
       syncedChanges: 0,
       lastActivity: entries.length > 0 ? entries[0].timestamp : null,
-      firstActivity: entries.length > 0 ? entries[entries.length - 1].timestamp : null
-    };
+      firstActivity: entries.length > 0 ? entries[entries.length - 1].timestamp : null,
+    }
 
-    entries.forEach(entry => {
+    entries.forEach((entry) => {
       switch (entry.operation) {
         case OperationType.ADD:
-          stats.adds++;
-          break;
+          stats.adds++
+          break
         case OperationType.MODIFY:
-          stats.modifies++;
-          break;
+          stats.modifies++
+          break
         case OperationType.DELETE:
-          stats.deletes++;
-          break;
+          stats.deletes++
+          break
         case OperationType.FORCE_CLEAR:
-          stats.forceResets++;
-          break;
+          stats.forceResets++
+          break
       }
 
       // 统计数据源
       switch (entry.source) {
         case 'local':
-          stats.localChanges++;
-          break;
+          stats.localChanges++
+          break
         case 'remote':
-          stats.remoteChanges++;
-          break;
+          stats.remoteChanges++
+          break
         case 'synced':
-          stats.syncedChanges++;
-          break;
+          stats.syncedChanges++
+          break
       }
 
       // 只对非强制重置操作统计文件/目录
       if (entry.operation !== OperationType.FORCE_CLEAR) {
         if (entry.fullPath.endsWith('/')) {
-          stats.directories++;
+          stats.directories++
         } else {
-          stats.files++;
+          stats.files++
         }
       }
-    });
+    })
 
-    return stats;
+    return stats
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
@@ -478,6 +473,15 @@ export class HistoryWebviewProvider {
 
         .btn-secondary:hover {
             background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
+        .btn-danger {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .btn-danger:hover {
+            background-color: var(--vscode-button-hoverBackground);
         }
 
         .stats-grid {
@@ -877,8 +881,8 @@ export class HistoryWebviewProvider {
                 return operationMatch && sourceMatch;
             });
             
-            // 确保过滤后的数据仍然按时间戳降序排列（最新的在前）
-            filteredEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            // 确保过滤后的数据仍然按原始索引降序排列
+            filteredEntries.sort((a, b) => b._originalIndex - a._originalIndex);
             
             renderTimeline();
         }
@@ -1294,6 +1298,6 @@ export class HistoryWebviewProvider {
         }
     </style>
 </body>
-</html>`;
+</html>`
   }
 }

@@ -1,25 +1,23 @@
-import * as vscode from 'vscode';
-import { CloudSyncConfig, CloudSyncStatus } from '../models/types';
-import { SettingsManager } from '../utils/settingsManager';
-import { CloudSyncManager } from '../utils/cloudSyncManager';
-import { StorageManager } from '../storage/storageManager';
-import { ContextManager } from '../utils/contextManager';
+import * as vscode from 'vscode'
+import { CloudSyncConfig, CloudSyncStatus } from '../types/types'
+import { SettingsManager } from '../utils/settingsManager'
+import { CloudSyncManager } from '../utils/cloudSyncManager'
+import { StorageManager } from '../storage/storageManager'
+import { ContextManager } from '../utils/contextManager'
 
 export class SettingsWebviewProvider {
-  public static readonly viewType = 'starcode-snippets.settings';
-  private static currentPanel: vscode.WebviewPanel | undefined;
+  public static readonly viewType = 'starcode-snippets.settings'
+  private static currentPanel: vscode.WebviewPanel | undefined
 
   private constructor() {}
 
   public static createOrShow(extensionUri: vscode.Uri) {
-    const column = vscode.window.activeTextEditor
-      ? vscode.window.activeTextEditor.viewColumn
-      : undefined;
+    const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined
 
     // 如果已经有设置面板打开，就激活它
     if (SettingsWebviewProvider.currentPanel) {
-      SettingsWebviewProvider.currentPanel.reveal(column);
-      return;
+      SettingsWebviewProvider.currentPanel.reveal(column)
+      return
     }
 
     // 创建新的WebView面板
@@ -30,161 +28,160 @@ export class SettingsWebviewProvider {
       {
         enableScripts: true,
         localResourceRoots: [extensionUri],
-        retainContextWhenHidden: true
+        retainContextWhenHidden: true,
       }
-    );
+    )
 
-    SettingsWebviewProvider.currentPanel = panel;
-    const provider = new SettingsWebviewProvider();
-    provider._setupWebview(panel, extensionUri);
+    SettingsWebviewProvider.currentPanel = panel
+    const provider = new SettingsWebviewProvider()
+    provider._setupWebview(panel, extensionUri)
 
     // 当面板被关闭时，清理引用
     panel.onDidDispose(() => {
-      SettingsWebviewProvider.currentPanel = undefined;
-    }, null);
+      SettingsWebviewProvider.currentPanel = undefined
+    }, null)
   }
 
   private _setupWebview(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-    panel.webview.html = this._getHtmlForWebview(panel.webview, extensionUri);
+    panel.webview.html = this._getHtmlForWebview(panel.webview, extensionUri)
 
     // 处理来自webview的消息
     panel.webview.onDidReceiveMessage(async (data) => {
       switch (data.type) {
         case 'saveConfig':
-          await this._saveConfig(data.config, panel);
-          break;
+          await this._saveConfig(data.config, panel)
+          break
         case 'testConnection':
-          await this._testConnection(data.config, panel);
-          break;
+          await this._testConnection(data.config, panel)
+          break
         case 'resetConfig':
-          await this._resetConfig(panel);
-          break;
+          await this._resetConfig(panel)
+          break
 
         case 'getConfig':
-          await this._sendConfigToWebview(panel);
-          break;
+          await this._sendConfigToWebview(panel)
+          break
         case 'manualSync':
-          await this._performManualSync(panel);
-          break;
+          await this._performManualSync(panel)
+          break
         case 'exportSettings':
-          await this._exportSettings(panel);
-          break;
+          await this._exportSettings(panel)
+          break
         case 'importSettings':
-          await this._importSettings(panel);
-          break;
+          await this._importSettings(panel)
+          break
         case 'forceResetCloudSync':
-          await this._forceResetCloudSync(panel);
-          break;
+          await this._forceResetCloudSync(panel)
+          break
         case 'abandonLocalAndImport':
-          await this._abandonLocalAndImport(panel);
-          break;
+          await this._abandonLocalAndImport(panel)
+          break
       }
-    });
+    })
 
     // 初始加载配置
-    this._sendConfigToWebview(panel);
+    this._sendConfigToWebview(panel)
   }
 
   private async _saveConfig(config: CloudSyncConfig, panel: vscode.WebviewPanel) {
     try {
-      const validation = SettingsManager.validateConfig(config);
+      const validation = SettingsManager.validateConfig(config)
       if (!validation.isValid) {
         panel.webview.postMessage({
           type: 'validationError',
-          errors: validation.errors
-        });
-        return;
+          errors: validation.errors,
+        })
+        return
       }
 
-      await SettingsManager.saveCloudSyncConfig(config);
-      
+      await SettingsManager.saveCloudSyncConfig(config)
+
       panel.webview.postMessage({
         type: 'saveSuccess',
-        message: '配置保存成功'
-      });
+        message: '配置保存成功',
+      })
 
-      vscode.window.showInformationMessage('云端同步配置已保存');
+      vscode.window.showInformationMessage('云端同步配置已保存')
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '保存配置时发生错误';
+      const errorMessage = error instanceof Error ? error.message : '保存配置时发生错误'
       panel.webview.postMessage({
         type: 'saveError',
-        message: errorMessage
-      });
-      vscode.window.showErrorMessage(`保存配置失败: ${errorMessage}`);
+        message: errorMessage,
+      })
+      vscode.window.showErrorMessage(`保存配置失败: ${errorMessage}`)
     }
   }
 
   private async _testConnection(config: CloudSyncConfig, panel: vscode.WebviewPanel) {
-    console.log('开始连接测试...');
+    console.log('开始连接测试...')
     try {
       panel.webview.postMessage({
         type: 'testingConnection',
-        message: '正在测试连接...'
-      });
+        message: '正在测试连接...',
+      })
 
       // 使用CloudSyncManager进行真实连接测试
-      console.log('创建CloudSyncManager实例...');
-      const context = SettingsManager.getExtensionContext();
+      console.log('创建CloudSyncManager实例...')
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
-      
-      const cloudSyncManager = new CloudSyncManager(context);
-      cloudSyncManager.updateConfig(config); // 使用最新配置
-      
-      console.log('调用testConnection方法...');
-      const result = await cloudSyncManager.testConnection();
-      console.log('连接测试结果:', result);
-      
+
+      const cloudSyncManager = new CloudSyncManager(context)
+      cloudSyncManager.updateConfig(config) // 使用最新配置
+
+      console.log('调用testConnection方法...')
+      const result = await cloudSyncManager.testConnection()
+      console.log('连接测试结果:', result)
+
       panel.webview.postMessage({
         type: 'testResult',
         success: result.success,
-        message: result.message
-      });
+        message: result.message,
+      })
 
       // 同时显示VSCode通知
       if (result.success) {
-        vscode.window.showInformationMessage(`连接测试成功: ${result.message}`);
+        vscode.window.showInformationMessage(`连接测试成功: ${result.message}`)
       } else {
-        vscode.window.showWarningMessage(`连接测试失败: ${result.message}`);
+        vscode.window.showWarningMessage(`连接测试失败: ${result.message}`)
       }
 
       // 更新状态
-      const status = SettingsManager.getCloudSyncStatus();
-      status.isConnected = result.success;
-      status.lastError = result.success ? null : result.message;
-      await SettingsManager.saveCloudSyncStatus(status);
+      const status = SettingsManager.getCloudSyncStatus()
+      status.isConnected = result.success
+      status.lastError = result.success ? null : result.message
+      await SettingsManager.saveCloudSyncStatus(status)
 
       // 只更新状态显示，不重新加载整个配置
       panel.webview.postMessage({
         type: 'statusUpdate',
-        status: status
-      });
-
+        status: status,
+      })
     } catch (error) {
-      console.error('连接测试异常:', error);
-      const errorMessage = error instanceof Error ? error.message : '连接测试失败';
-      
+      console.error('连接测试异常:', error)
+      const errorMessage = error instanceof Error ? error.message : '连接测试失败'
+
       panel.webview.postMessage({
         type: 'testResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
       // 显示VSCode错误通知
-      vscode.window.showErrorMessage(`连接测试异常: ${errorMessage}`);
+      vscode.window.showErrorMessage(`连接测试异常: ${errorMessage}`)
 
       // 更新状态
-      const status = SettingsManager.getCloudSyncStatus();
-      status.isConnected = false;
-      status.lastError = errorMessage;
-      await SettingsManager.saveCloudSyncStatus(status);
+      const status = SettingsManager.getCloudSyncStatus()
+      status.isConnected = false
+      status.lastError = errorMessage
+      await SettingsManager.saveCloudSyncStatus(status)
 
       // 只更新状态显示，不重新加载整个配置
       panel.webview.postMessage({
         type: 'statusUpdate',
-        status: status
-      });
+        status: status,
+      })
     }
   }
 
@@ -196,14 +193,14 @@ export class SettingsWebviewProvider {
         { modal: true },
         '确定重置',
         '取消'
-      );
+      )
 
       if (confirmReset !== '确定重置') {
         panel.webview.postMessage({
           type: 'resetSuccess',
-          message: '用户取消重置操作'
-        });
-        return;
+          message: '用户取消重置操作',
+        })
+        return
       }
 
       // 重置配置
@@ -217,43 +214,41 @@ export class SettingsWebviewProvider {
         addressing: 'virtual-hosted-style',
         autoSync: false,
         syncInterval: 60,
-        concurrency: 3
-      };
+        concurrency: 3,
+      }
 
-      await SettingsManager.saveCloudSyncConfig(defaultConfig);
-      
+      await SettingsManager.saveCloudSyncConfig(defaultConfig)
+
       // 发送成功消息
       panel.webview.postMessage({
         type: 'resetSuccess',
-        message: '配置已重置'
-      });
+        message: '配置已重置',
+      })
 
       // 重新发送配置数据
-      await this._sendConfigToWebview(panel);
+      await this._sendConfigToWebview(panel)
     } catch (error) {
-      console.error('重置配置失败:', error);
+      console.error('重置配置失败:', error)
       panel.webview.postMessage({
         type: 'saveError',
-        message: `重置配置失败: ${error}`
-      });
+        message: `重置配置失败: ${error}`,
+      })
     }
   }
 
-
-
   private async _sendConfigToWebview(panel: vscode.WebviewPanel) {
     if (!panel) {
-      return;
+      return
     }
 
-    const config = SettingsManager.getCloudSyncConfig();
-    const status = SettingsManager.getCloudSyncStatus();
+    const config = SettingsManager.getCloudSyncConfig()
+    const status = SettingsManager.getCloudSyncStatus()
 
     panel.webview.postMessage({
       type: 'configData',
       config,
-      status
-    });
+      status,
+    })
   }
 
   private async _performManualSync(panel: vscode.WebviewPanel) {
@@ -263,62 +258,61 @@ export class SettingsWebviewProvider {
         panel.webview.postMessage({
           type: 'manualSyncResult',
           success: false,
-          message: '用户正在编辑代码片段，请完成编辑后再进行同步'
-        });
-        vscode.window.showWarningMessage('用户正在编辑代码片段，请完成编辑后再进行同步', '我知道了');
-        return;
+          message: '用户正在编辑代码片段，请完成编辑后再进行同步',
+        })
+        vscode.window.showWarningMessage('用户正在编辑代码片段，请完成编辑后再进行同步', '我知道了')
+        return
       }
-      
+
       panel.webview.postMessage({
         type: 'syncStarted',
-        message: '正在执行手动同步...'
-      });
+        message: '正在执行手动同步...',
+      })
 
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
-      const storageManager = new StorageManager(context);
-      const cloudSyncManager = new CloudSyncManager(context, storageManager);
+      const storageManager = new StorageManager(context)
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
 
       const [snippets, directories] = await Promise.all([
         storageManager.getAllSnippets(),
-        storageManager.getAllDirectories()
-      ]);
+        storageManager.getAllDirectories(),
+      ])
 
-      const result = await cloudSyncManager.performSync(snippets, directories);
-      
+      const result = await cloudSyncManager.performSync(snippets, directories)
+
       panel.webview.postMessage({
         type: 'manualSyncResult',
         success: result.success,
-        message: result.message
-      });
+        message: result.message,
+      })
 
       if (result.success) {
-        vscode.window.showInformationMessage(`手动同步成功: ${result.message}`);
+        vscode.window.showInformationMessage(`手动同步成功: ${result.message}`)
       } else {
-        vscode.window.showWarningMessage(`手动同步失败: ${result.message}`);
+        vscode.window.showWarningMessage(`手动同步失败: ${result.message}`)
       }
 
       // 更新状态显示
-      const status = SettingsManager.getCloudSyncStatus();
+      const status = SettingsManager.getCloudSyncStatus()
       panel.webview.postMessage({
         type: 'statusUpdate',
-        status: status
-      });
-
+        status: status,
+      })
     } catch (error) {
-      console.error('手动同步异常:', error);
-      const errorMessage = error instanceof Error ? error.message : '手动同步失败';
-      
+      console.error('手动同步异常:', error)
+      const errorMessage = error instanceof Error ? error.message : '手动同步失败'
+
       panel.webview.postMessage({
         type: 'manualSyncResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`手动同步异常: ${errorMessage}`);
+      vscode.window.showErrorMessage(`手动同步异常: ${errorMessage}`)
     }
   }
 
@@ -327,28 +321,28 @@ export class SettingsWebviewProvider {
       // 安全提醒
       const securityWarning = await vscode.window.showWarningMessage(
         '⚠️ 安全提醒：导出的配置文件将包含完整的访问密钥信息。请确保：\n\n' +
-        '• 妥善保管导出的文件\n' +
-        '• 不要将文件分享给不信任的人\n' +
-        '• 不要上传到公共代码仓库\n' +
-        '• 建议加密存储或使用安全的传输方式\n\n' +
-        '确定要继续导出吗？',
+          '• 妥善保管导出的文件\n' +
+          '• 不要将文件分享给不信任的人\n' +
+          '• 不要上传到公共代码仓库\n' +
+          '• 建议加密存储或使用安全的传输方式\n\n' +
+          '确定要继续导出吗？',
         { modal: true },
         '继续导出',
         '取消'
-      );
+      )
 
       if (securityWarning !== '继续导出') {
         panel.webview.postMessage({
           type: 'exportResult',
           success: false,
-          message: '用户取消导出操作'
-        });
-      return;
-    }
+          message: '用户取消导出操作',
+        })
+        return
+      }
 
-    const config = SettingsManager.getCloudSyncConfig();
-    const status = SettingsManager.getCloudSyncStatus();
-      
+      const config = SettingsManager.getCloudSyncConfig()
+      const status = SettingsManager.getCloudSyncStatus()
+
       // 创建完整的导出数据
       const exportData = {
         version: '1.0',
@@ -364,51 +358,50 @@ export class SettingsWebviewProvider {
           addressing: config.addressing,
           autoSync: config.autoSync,
           syncInterval: config.syncInterval,
-          concurrency: config.concurrency
+          concurrency: config.concurrency,
         },
         status: {
           isConnected: status.isConnected,
-          lastSyncTime: status.lastSyncTime
-        }
-      };
+          lastSyncTime: status.lastSyncTime,
+        },
+      }
 
-      const exportJson = JSON.stringify(exportData, null, 2);
-      
+      const exportJson = JSON.stringify(exportData, null, 2)
+
       const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(`starcode-sync-settings-${new Date().toISOString().split('T')[0]}.json`),
         filters: {
           'JSON files': ['json'],
-          'All files': ['*']
-        }
-      });
+          'All files': ['*'],
+        },
+      })
 
       if (uri) {
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(exportJson, 'utf8'));
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(exportJson, 'utf8'))
 
-    panel.webview.postMessage({
+        panel.webview.postMessage({
           type: 'exportResult',
           success: true,
-          message: '设置导出成功（包含完整配置）'
-        });
-        
+          message: '设置导出成功（包含完整配置）',
+        })
+
         // 再次提醒安全注意事项
         vscode.window.showInformationMessage(
           `✅ 设置已导出到: ${uri.fsPath}\n\n🔒 请注意：文件包含敏感信息，请妥善保管！`,
           '我知道了'
-        );
+        )
       }
-
     } catch (error) {
-      console.error('导出设置失败:', error);
-      const errorMessage = error instanceof Error ? error.message : '导出设置失败';
-      
+      console.error('导出设置失败:', error)
+      const errorMessage = error instanceof Error ? error.message : '导出设置失败'
+
       panel.webview.postMessage({
         type: 'exportResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`导出设置失败: ${errorMessage}`);
+      vscode.window.showErrorMessage(`导出设置失败: ${errorMessage}`)
     }
   }
 
@@ -420,15 +413,15 @@ export class SettingsWebviewProvider {
         { modal: true },
         '继续导入',
         '取消'
-      );
+      )
 
       if (confirmImport !== '继续导入') {
         panel.webview.postMessage({
           type: 'importResult',
           success: false,
-          message: '用户取消导入操作'
-        });
-        return;
+          message: '用户取消导入操作',
+        })
+        return
       }
 
       const uris = await vscode.window.showOpenDialog({
@@ -437,35 +430,35 @@ export class SettingsWebviewProvider {
         canSelectMany: false,
         filters: {
           'JSON files': ['json'],
-          'All files': ['*']
-        }
-      });
+          'All files': ['*'],
+        },
+      })
 
       if (!uris || uris.length === 0) {
-        return;
+        return
       }
 
-      const fileContent = await vscode.workspace.fs.readFile(uris[0]);
-      const importText = new TextDecoder().decode(fileContent);
-      
-      let importData;
+      const fileContent = await vscode.workspace.fs.readFile(uris[0])
+      const importText = new TextDecoder().decode(fileContent)
+
+      let importData
       try {
-        importData = JSON.parse(importText);
+        importData = JSON.parse(importText)
       } catch (parseError) {
-        throw new Error('文件格式无效，请选择有效的JSON文件');
+        throw new Error('文件格式无效，请选择有效的JSON文件')
       }
 
       // 验证导入数据格式
       if (!importData.config || !importData.version) {
-        throw new Error('文件格式不正确，缺少必要的配置信息');
+        throw new Error('文件格式不正确，缺少必要的配置信息')
       }
 
       // 获取当前配置
-      const currentConfig = SettingsManager.getCloudSyncConfig();
-      
+      const currentConfig = SettingsManager.getCloudSyncConfig()
+
       // 检查导入数据是否包含敏感信息
-      const hasCredentials = importData.config.accessKey || importData.config.secretKey;
-      
+      const hasCredentials = importData.config.accessKey || importData.config.secretKey
+
       // 合并配置
       const newConfig = {
         endpoint: importData.config.endpoint || currentConfig.endpoint || '',
@@ -475,56 +468,56 @@ export class SettingsWebviewProvider {
         region: importData.config.region || currentConfig.region || '',
         timeout: importData.config.timeout || currentConfig.timeout || 30,
         addressing: importData.config.addressing || currentConfig.addressing || 'virtual-hosted-style',
-        autoSync: importData.config.autoSync !== undefined ? importData.config.autoSync : currentConfig.autoSync || false,
+        autoSync:
+          importData.config.autoSync !== undefined ? importData.config.autoSync : currentConfig.autoSync || false,
         syncInterval: importData.config.syncInterval || currentConfig.syncInterval || 60,
-        concurrency: importData.config.concurrency || currentConfig.concurrency || 3
-      };
+        concurrency: importData.config.concurrency || currentConfig.concurrency || 3,
+      }
 
       // 验证配置
-      const validation = SettingsManager.validateConfig(newConfig);
+      const validation = SettingsManager.validateConfig(newConfig)
       if (!validation.isValid) {
         // 如果验证失败，仍然导入但给出警告
-        const warningMessage = `配置导入成功，但存在以下问题: ${validation.errors.join(', ')}`;
-        vscode.window.showWarningMessage(warningMessage);
+        const warningMessage = `配置导入成功，但存在以下问题: ${validation.errors.join(', ')}`
+        vscode.window.showWarningMessage(warningMessage)
       }
 
       // 保存配置
-      await SettingsManager.saveCloudSyncConfig(newConfig);
-      
+      await SettingsManager.saveCloudSyncConfig(newConfig)
+
       // 更新页面显示
-      await this._sendConfigToWebview(panel);
-      
+      await this._sendConfigToWebview(panel)
+
       // 生成导入结果消息
-      let importMessage = '设置导入成功';
-      let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`;
-      
+      let importMessage = '设置导入成功'
+      let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`
+
       if (hasCredentials) {
-        importMessage += '（包含访问密钥）';
-        notificationMessage += '\n\n✅ 已导入完整配置，包括访问密钥信息';
+        importMessage += '（包含访问密钥）'
+        notificationMessage += '\n\n✅ 已导入完整配置，包括访问密钥信息'
       } else {
-        importMessage += '（未包含访问密钥，已保留当前密钥）';
-        notificationMessage += '\n\n⚠️ 导入的配置不包含访问密钥，已保留当前设置的密钥信息';
+        importMessage += '（未包含访问密钥，已保留当前密钥）'
+        notificationMessage += '\n\n⚠️ 导入的配置不包含访问密钥，已保留当前设置的密钥信息'
       }
-      
+
       panel.webview.postMessage({
         type: 'importResult',
         success: true,
-        message: importMessage
-      });
-      
-      vscode.window.showInformationMessage(notificationMessage);
+        message: importMessage,
+      })
 
+      vscode.window.showInformationMessage(notificationMessage)
     } catch (error) {
-      console.error('导入设置失败:', error);
-      const errorMessage = error instanceof Error ? error.message : '导入设置失败';
-      
+      console.error('导入设置失败:', error)
+      const errorMessage = error instanceof Error ? error.message : '导入设置失败'
+
       panel.webview.postMessage({
         type: 'importResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`导入设置失败: ${errorMessage}`);
+      vscode.window.showErrorMessage(`导入设置失败: ${errorMessage}`)
     }
   }
 
@@ -535,9 +528,9 @@ export class SettingsWebviewProvider {
         panel.webview.postMessage({
           type: 'forceResetResult',
           success: false,
-          message: '用户正在编辑代码片段，请完成编辑后再进行重置'
-        });
-        return;
+          message: '用户正在编辑代码片段，请完成编辑后再进行重置',
+        })
+        return
       }
 
       // 显示严重警告
@@ -551,22 +544,22 @@ export class SettingsWebviewProvider {
 这是一个不可逆的操作！
 请确保您了解此操作的后果。
 
-是否继续？`;
+是否继续？`
 
       const choice = await vscode.window.showWarningMessage(
         warningMessage,
         { modal: true },
         '我了解风险，继续执行',
         '取消'
-      );
+      )
 
       if (choice !== '我了解风险，继续执行') {
         panel.webview.postMessage({
           type: 'forceResetResult',
           success: false,
-          message: '用户取消了重置操作'
-        });
-        return;
+          message: '用户取消了重置操作',
+        })
+        return
       }
 
       // 二次确认
@@ -575,75 +568,74 @@ export class SettingsWebviewProvider {
         { modal: true },
         '确认执行',
         '取消'
-      );
+      )
 
       if (finalConfirm !== '确认执行') {
         panel.webview.postMessage({
           type: 'forceResetResult',
           success: false,
-          message: '用户取消了重置操作'
-        });
-        return;
+          message: '用户取消了重置操作',
+        })
+        return
       }
 
       // 发送开始重置消息
       panel.webview.postMessage({
         type: 'forceResetStarted',
-        message: '正在执行强制重置...'
-      });
+        message: '正在执行强制重置...',
+      })
 
       // 获取扩展上下文和存储管理器
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
       // 创建存储管理器实例
-      const storageManager = new StorageManager(context);
-      const cloudSyncManager = new CloudSyncManager(context, storageManager);
-      
+      const storageManager = new StorageManager(context)
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
       if (!cloudSyncManager.isConfigured()) {
-        throw new Error('云端同步未配置，请先完成配置');
+        throw new Error('云端同步未配置，请先完成配置')
       }
 
       // 获取当前代码片段和目录
       const [snippets, directories] = await Promise.all([
         storageManager.getAllSnippets(),
-        storageManager.getAllDirectories()
-      ]);
+        storageManager.getAllDirectories(),
+      ])
 
       // 执行强制重置
-      const result = await cloudSyncManager.forceResetCloudSync(snippets, directories);
-      
+      const result = await cloudSyncManager.forceResetCloudSync(snippets, directories)
+
       // 发送结果消息
       panel.webview.postMessage({
         type: 'forceResetResult',
         success: result.success,
-        message: result.message
-      });
+        message: result.message,
+      })
 
       if (result.success) {
-        vscode.window.showInformationMessage(`✅ ${result.message}`);
-        
-        // 刷新树视图以显示重置后的状态
-        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
-        
-        // 重新发送配置和状态到webview
-        await this._sendConfigToWebview(panel);
-      } else {
-        vscode.window.showErrorMessage(`❌ ${result.message}`);
-      }
+        vscode.window.showInformationMessage(`✅ ${result.message}`)
 
+        // 刷新树视图以显示重置后的状态
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
+
+        // 重新发送配置和状态到webview
+        await this._sendConfigToWebview(panel)
+      } else {
+        vscode.window.showErrorMessage(`❌ ${result.message}`)
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '强制重置失败';
-      
+      const errorMessage = error instanceof Error ? error.message : '强制重置失败'
+
       panel.webview.postMessage({
         type: 'forceResetResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`❌ 强制重置失败: ${errorMessage}`);
+      vscode.window.showErrorMessage(`❌ 强制重置失败: ${errorMessage}`)
     }
   }
 
@@ -654,9 +646,9 @@ export class SettingsWebviewProvider {
         panel.webview.postMessage({
           type: 'abandonLocalResult',
           success: false,
-          message: '用户正在编辑代码片段，请完成编辑后再进行操作'
-        });
-        return;
+          message: '用户正在编辑代码片段，请完成编辑后再进行操作',
+        })
+        return
       }
 
       // 显示警告
@@ -670,76 +662,75 @@ export class SettingsWebviewProvider {
 本地的所有未同步更改将丢失！
 请确保您了解此操作的后果。
 
-是否继续？`;
+是否继续？`
 
       const choice = await vscode.window.showWarningMessage(
         warningMessage,
         { modal: true },
         '我了解风险，继续执行',
         '取消'
-      );
+      )
 
       if (choice !== '我了解风险，继续执行') {
         panel.webview.postMessage({
           type: 'abandonLocalResult',
           success: false,
-          message: '用户取消了操作'
-        });
-        return;
+          message: '用户取消了操作',
+        })
+        return
       }
 
       // 发送开始操作消息
       panel.webview.postMessage({
         type: 'abandonLocalStarted',
-        message: '正在从云端导入数据...'
-      });
+        message: '正在从云端导入数据...',
+      })
 
       // 获取扩展上下文和存储管理器
-      const context = SettingsManager.getExtensionContext();
+      const context = SettingsManager.getExtensionContext()
       if (!context) {
-        throw new Error('扩展上下文未初始化');
+        throw new Error('扩展上下文未初始化')
       }
 
       // 创建存储管理器实例
-      const storageManager = new StorageManager(context);
-      const cloudSyncManager = new CloudSyncManager(context, storageManager);
-      
+      const storageManager = new StorageManager(context)
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
       if (!cloudSyncManager.isConfigured()) {
-        throw new Error('云端同步未配置，请先完成配置');
+        throw new Error('云端同步未配置，请先完成配置')
       }
 
       // 执行放弃本地并从云端导入
-      const result = await cloudSyncManager.abandonLocalAndImportFromCloud();
-      
+      const result = await cloudSyncManager.abandonLocalAndImportFromCloud()
+
       // 发送结果消息
       panel.webview.postMessage({
         type: 'abandonLocalResult',
         success: result.success,
-        message: result.message
-      });
+        message: result.message,
+      })
 
       if (result.success) {
-        vscode.window.showInformationMessage(`✅ ${result.message}`);
-        
-        // 刷新树视图以显示导入的代码片段
-        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer');
-        
-        // 重新发送配置和状态到webview
-        await this._sendConfigToWebview(panel);
-      } else {
-        vscode.window.showWarningMessage(`⚠️ ${result.message}`);
-      }
+        vscode.window.showInformationMessage(`✅ ${result.message}`)
 
+        // 刷新树视图以显示导入的代码片段
+        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
+
+        // 重新发送配置和状态到webview
+        await this._sendConfigToWebview(panel)
+      } else {
+        vscode.window.showWarningMessage(`⚠️ ${result.message}`)
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '从云端导入失败';
-      
+      const errorMessage = error instanceof Error ? error.message : '从云端导入失败'
+
       panel.webview.postMessage({
         type: 'abandonLocalResult',
         success: false,
-        message: errorMessage
-      });
+        message: errorMessage,
+      })
 
-      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`);
+      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`)
     }
   }
 
@@ -1360,6 +1351,6 @@ export class SettingsWebviewProvider {
         });
     </script>
 </body>
-</html>`;
+</html>`
   }
-} 
+}
