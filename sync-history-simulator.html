@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StarCode Snippets 同步历史记录模拟器</title>
+  <style>
+    :root {
+      --primary-color: #007acc;
+      --secondary-color: #2c2c32;
+      --background-color: #1e1e1e;
+      --panel-bg: #252526;
+      --border-color: #444;
+      --text-color: #e0e0e0;
+      --hover-color: #2a2d2e;
+      --selected-color: #37373d;
+      --danger-color: #e05252;
+      --success-color: #6a9955;
+      --dir-color: #dcdcaa;
+      --snippet-color: #4fc1ff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--background-color);
+      color: var(--text-color);
+      line-height: 1.6;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 20px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      color: var(--primary-color);
+    }
+
+    h2 {
+      font-size: 1.2rem;
+      margin-bottom: 10px;
+    }
+
+    .controls {
+      height: 48px;
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background-color: var(--secondary-color);
+      color: var(--text-color);
+      border: 1px solid var(--border-color);
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      white-space: nowrap;
+    }
+
+    .controls > button {
+      width: 150px;
+    }
+
+    button:hover {
+      background-color: var(--hover-color);
+    }
+
+    button.primary {
+      background-color: var(--primary-color);
+      color: white;
+    }
+
+    button.danger {
+      background-color: var(--danger-color);
+      color: white;
+    }
+
+    select,
+    input,
+    textarea {
+      background-color: var(--secondary-color);
+      color: var(--text-color);
+      border: 1px solid var(--border-color);
+      padding: 8px 12px;
+      border-radius: 4px;
+      width: 100%;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 1fr 2fr;
+      gap: 20px;
+      height: calc(100vh - 100px);
+      overflow: hidden;
+    }
+
+    .tree-panel,
+    .action-panel,
+    .history-panel {
+      background-color: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 15px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .directory-tree {
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+
+    .tree-node {
+      display: flex;
+      flex-direction: column;
+      margin: 2px 0;
+    }
+
+    .tree-node-header {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .tree-node-header:hover {
+      background-color: var(--hover-color);
+    }
+
+    .tree-node-header.selected {
+      background-color: var(--selected-color);
+    }
+
+    .tree-node-content {
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+
+    .tree-node-icon {
+      margin-right: 6px;
+      font-size: 1.1em;
+    }
+
+    .tree-node-actions {
+      display: flex;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .tree-node-header:hover .tree-node-actions {
+      opacity: 1;
+    }
+
+    .tree-node-actions button {
+      padding: 2px 6px;
+      margin-left: 4px;
+      font-size: 0.8rem;
+      background-color: var(--secondary-color);
+    }
+
+    .action-delete {
+      background-color: var(--danger-color) !important;
+      color: white;
+    }
+
+    .directory .tree-node-content {
+      color: var(--dir-color);
+      font-weight: bold;
+    }
+
+    .file .tree-node-content {
+      color: var(--snippet-color);
+    }
+
+    .tree-node-children {
+      margin-left: 24px;
+      border-left: 1px dashed var(--border-color);
+      padding-left: 8px;
+    }
+
+    .root-node {
+      margin-bottom: 10px;
+    }
+
+    .root-node > .tree-node-header {
+      font-weight: bold;
+    }
+
+    .root-node > .tree-node-children {
+      margin-left: 12px;
+    }
+
+    .selected {
+      background-color: var(--selected-color);
+      border-radius: 4px;
+    }
+
+    .action-form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .history-records {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .history-header {
+      display: grid;
+      grid-template-columns: 60px 1fr 1fr 1fr 100px;
+      gap: 10px;
+      padding: 10px 5px;
+      background-color: var(--secondary-color);
+      font-weight: bold;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .history-content {
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+
+    .history-item {
+      display: grid;
+      grid-template-columns: 60px 1fr 1fr 1fr 100px;
+      gap: 10px;
+      padding: 10px 5px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .history-item:hover {
+      background-color: var(--hover-color);
+    }
+
+    .op-type {
+      font-weight: bold;
+    }
+
+    .op-type.add {
+      color: var(--success-color);
+    }
+
+    .op-type.modify {
+      color: var(--primary-color);
+    }
+
+    .op-type.delete {
+      color: var(--danger-color);
+    }
+
+    .op-type.reset {
+      color: #ff8c00;
+    }
+
+    .path {
+      word-break: break-all;
+    }
+
+    .hash {
+      font-family: monospace;
+      word-break: break-all;
+    }
+
+    .timestamp,
+    .device {
+      white-space: nowrap;
+    }
+    
+    /* 通知提示样式 */
+    .notification {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background-color: var(--panel-bg);
+      color: var(--text-color);
+      border-left: 4px solid var(--primary-color);
+      border-radius: 4px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+      z-index: 1000;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.3s, transform 0.3s;
+      max-width: 350px;
+    }
+    
+    .notification.success {
+      border-left-color: var(--success-color);
+    }
+    
+    .notification.error {
+      border-left-color: var(--danger-color);
+    }
+    
+    .notification.warning {
+      border-left-color: #ff8c00;
+    }
+    
+    .notification.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>StarCode Snippets 同步历史记录模拟器</h1>
+      <div class="controls">
+        <button id="resetBtn" class="danger">清除所有数据</button>
+        <button id="generateRandomBtn">随机生成历史记录</button>
+        <button id="exportBtn">导出历史记录</button>
+        <button id="importBtn">导入历史记录</button>
+        <input type="file" id="importFile" accept=".txt" style="display: none;">
+        <select id="deviceSelector">
+          <option value="device1">设备1</option>
+          <option value="device2">设备2</option>
+          <option value="device3">设备3</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="tree-panel">
+        <div class="panel-header">
+          <h2>目录树</h2>
+          <div>
+            <button id="copyTreeBtn" title="复制树结构">复制树结构</button>
+            <button id="addDirBtn">+ 新建目录</button>
+          </div>
+        </div>
+        <div id="directoryTree" class="directory-tree">
+          <div class="root-node">
+            <div class="tree-node-header ${state.selectedPath === '/' ? 'selected' : ''}" data-path="/">
+              <span class="tree-node-icon">📁</span>
+              <span class="tree-node-content">根目录</span>
+            </div>
+            <div class="tree-node-children" id="root-children"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-panel">
+        <div class="panel-header">
+          <h2>操作面板</h2>
+        </div>
+        <div class="action-form">
+          <div class="form-group">
+            <label for="actionType">操作类型</label>
+            <select id="actionType">
+              <option value="addDir">新增目录</option>
+              <option value="addSnippet">新增代码片段</option>
+              <option value="modifySnippet">修改代码片段</option>
+              <option value="deleteItem">删除项目</option>
+              <option value="forceReset">强制重置</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="pathGroup">
+            <label for="path">路径</label>
+            <input type="text" id="path" placeholder="/目录名称/" readonly>
+            <select id="parentDir" style="display: none;">
+              <option value="/">/</option>
+            </select>
+            <input type="text" id="itemName" placeholder="名称" style="display: none;">
+          </div>
+
+          <div class="form-group" id="codeGroup" style="display: none;">
+            <label for="code">代码内容</label>
+            <textarea id="code" rows="6" placeholder="输入代码内容"></textarea>
+          </div>
+
+          <div class="form-group" id="languageGroup" style="display: none;">
+            <label for="language">语言</label>
+            <select id="language">
+              <option value="javascript">JavaScript</option>
+              <option value="typescript">TypeScript</option>
+              <option value="html">HTML</option>
+              <option value="css">CSS</option>
+              <option value="python">Python</option>
+              <option value="java">Java</option>
+              <option value="csharp">C#</option>
+              <option value="cpp">C++</option>
+              <option value="go">Go</option>
+              <option value="rust">Rust</option>
+              <option value="php">PHP</option>
+              <option value="ruby">Ruby</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <button id="executeBtn" class="primary">执行操作</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="history-panel">
+        <div class="panel-header">
+          <h2>历史记录</h2>
+          <button id="copyHistoryBtn" title="复制原始历史记录内容">复制原始内容</button>
+        </div>
+        <div id="historyRecords" class="history-records">
+          <div class="history-header">
+            <span class="op-type">操作</span>
+            <span class="path">路径</span>
+            <span class="hash">哈希值</span>
+            <span class="timestamp">时间戳</span>
+            <span class="device">设备</span>
+          </div>
+          <div id="historyContent" class="history-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    // 全局状态
+    const state = {
+      directories: ['/'], // 目录列表，以 / 开头和结尾
+      snippets: [], // 代码片段列表，包含路径和内容
+      history: [], // 历史记录
+      selectedPath: '/' // 当前选中的路径
+    }
+
+    // 页面元素
+    const elements = {
+      directoryTree: document.getElementById('directoryTree'),
+      actionType: document.getElementById('actionType'),
+      parentDir: document.getElementById('parentDir'),
+      itemName: document.getElementById('itemName'),
+      path: document.getElementById('path'),
+      code: document.getElementById('code'),
+      language: document.getElementById('language'),
+      codeGroup: document.getElementById('codeGroup'),
+      languageGroup: document.getElementById('languageGroup'),
+      pathGroup: document.getElementById('pathGroup'),
+      historyContent: document.getElementById('historyContent'),
+      executeBtn: document.getElementById('executeBtn'),
+      resetBtn: document.getElementById('resetBtn'),
+      exportBtn: document.getElementById('exportBtn'),
+      importBtn: document.getElementById('importBtn'),
+      importFile: document.getElementById('importFile'),
+      deviceSelector: document.getElementById('deviceSelector'),
+      addDirBtn: document.getElementById('addDirBtn')
+    }
+
+    // 工具函数 - 计算SHA256哈希
+    async function calculateSHA256(str) {
+      const encoder = new TextEncoder()
+      const data = encoder.encode(str)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+      return hashHex
+    }
+
+    // 工具函数 - 生成ISO格式的时间戳
+    function generateTimestamp() {
+      return new Date().toISOString()
+    }
+
+    // 工具函数 - 获取当前设备标识
+    function getCurrentDevice() {
+      return elements.deviceSelector.value
+    }
+
+    // 根据更新的历史记录规则修改工具函数 - 添加历史记录
+    async function addHistoryRecord(opType, path, content = null) {
+      const timestamp = generateTimestamp()
+      const device = getCurrentDevice()
+      
+      let hash = '#' // 默认为占位符
+      
+      // 对于新增和修改文件，计算哈希值
+      if ((opType === '+' || opType === '~') && content !== null) {
+        hash = await calculateSHA256(content)
+      } else if (opType === '-' && !path.endsWith('/') && content !== null) {
+        // 对于文件删除操作，如果提供了内容，也计算哈希值
+        hash = await calculateSHA256(content)
+      }
+      
+      // 对于强制清空操作(!), 使用占位符
+      if (opType === '!') {
+        hash = '#'
+      }
+      
+      // 创建历史记录条目
+      const historyEntry = {
+        opType,
+        path,
+        hash,
+        timestamp,
+        device
+      }
+      
+      // 添加到历史记录数组
+      state.history.push(historyEntry)
+      
+      // 更新UI
+      renderHistoryRecords()
+      
+      // 返回创建的记录
+      return historyEntry
+    }
+
+    // 更新目录下拉选择框
+    function updateDirectorySelect() {
+      // 清空现有选项
+      elements.parentDir.innerHTML = ''
+
+      // 添加所有目录作为选项
+      state.directories.forEach(dir => {
+        const option = document.createElement('option')
+        option.value = dir
+        option.textContent = dir
+        elements.parentDir.appendChild(option)
+      })
+    }
+
+    // 渲染目录树
+    function renderDirectoryTree() {
+      // 清空目录树内容
+      elements.directoryTree.innerHTML = `
+        <div class="root-node">
+          <div class="tree-node-header ${state.selectedPath === '/' ? 'selected' : ''}" data-path="/">
+            <span class="tree-node-icon">📁</span>
+            <span class="tree-node-content">根目录</span>
+          </div>
+          <div class="tree-node-children" id="root-children"></div>
+        </div>
+      `
+
+      const rootChildren = document.getElementById('root-children')
+
+      // 构建目录树结构
+      const directoryStructure = {}
+
+      // 添加所有目录到结构中
+      state.directories.forEach(dir => {
+        if (dir === '/') return // 跳过根目录
+
+        const parts = dir.split('/').filter(Boolean)
+        let current = directoryStructure
+
+        parts.forEach(part => {
+          current[part] = current[part] || { __type: 'directory', __children: {} }
+          current = current[part].__children
+        })
+      })
+
+      // 添加所有代码片段到结构中
+      state.snippets.forEach(snippet => {
+        const pathParts = snippet.path.split('/').filter(Boolean)
+        const fileName = pathParts.pop() // 获取文件名
+
+        let current = directoryStructure
+
+        pathParts.forEach(part => {
+          if (!current[part]) {
+            current[part] = { __type: 'directory', __children: {} }
+          }
+          current = current[part].__children
+        })
+
+        current[fileName] = { __type: 'snippet', __data: snippet }
+      })
+
+      // 递归构建目录树DOM
+      function buildTreeNode(structure, parentElement, parentPath = '/') {
+        Object.keys(structure).forEach(key => {
+          const item = structure[key]
+
+          if (key === '__type' || key === '__children' || key === '__data') return
+
+          const isDirectory = item.__type === 'directory'
+          const currentPath = isDirectory
+            ? `${parentPath}${key}/`
+            : `${parentPath}${key}`
+
+          // 创建节点容器
+          const nodeElement = document.createElement('div')
+          nodeElement.className = `tree-node ${isDirectory ? 'directory' : 'file'}`
+          
+          // 创建节点标题行
+          const headerElement = document.createElement('div')
+          headerElement.className = `tree-node-header ${state.selectedPath === currentPath ? 'selected' : ''}`
+          headerElement.setAttribute('data-path', currentPath)
+          
+          // 创建图标
+          const iconElement = document.createElement('span')
+          iconElement.className = 'tree-node-icon'
+          iconElement.textContent = isDirectory ? '📁' : '📄'
+          
+          // 创建内容区域
+          const contentElement = document.createElement('span')
+          contentElement.className = 'tree-node-content'
+          contentElement.textContent = key
+          
+          // 创建操作区域
+          const actionsElement = document.createElement('div')
+          actionsElement.className = 'tree-node-actions'
+          
+          // 添加删除按钮
+          const deleteButton = document.createElement('button')
+          deleteButton.className = 'action-delete'
+          deleteButton.textContent = '×'
+          deleteButton.title = '删除'
+          deleteButton.addEventListener('click', async (e) => {
+            e.stopPropagation()
+            
+            if (isDirectory) {
+              if (confirm(`确定要删除目录 "${key}" 及其所有内容吗？`)) {
+                await deleteDirectory(currentPath)
+                renderDirectoryTree()
+              }
+            } else {
+              if (confirm(`确定要删除代码片段 "${key}" 吗？`)) {
+                await deleteSnippet(currentPath)
+                renderDirectoryTree()
+              }
+            }
+          })
+          
+          // 组装标题行
+          headerElement.appendChild(iconElement)
+          headerElement.appendChild(contentElement)
+          actionsElement.appendChild(deleteButton)
+          headerElement.appendChild(actionsElement)
+          
+          // 添加标题行到节点
+          nodeElement.appendChild(headerElement)
+          
+          // 点击选择
+          headerElement.addEventListener('click', (e) => {
+            e.stopPropagation()
+            selectPath(currentPath)
+          })
+
+          // 如果是目录，添加子项容器
+          if (isDirectory) {
+            const childrenContainer = document.createElement('div')
+            childrenContainer.className = 'tree-node-children'
+            nodeElement.appendChild(childrenContainer)
+            
+            // 递归构建子节点
+            buildTreeNode(item.__children, childrenContainer, currentPath)
+          }
+          
+          // 添加完整节点到父元素
+          parentElement.appendChild(nodeElement)
+        })
+      }
+
+      // 构建整个树
+      buildTreeNode(directoryStructure, rootChildren)
+
+      // 更新目录选择框
+      updateDirectorySelect()
+    }
+
+    // 渲染历史记录
+    function renderHistoryRecords() {
+      elements.historyContent.innerHTML = ''
+
+      state.history.forEach(record => {
+        const recordElement = document.createElement('div')
+        recordElement.className = 'history-item'
+
+        // 操作类型
+        const opTypeClass = record.opType === '+' ? 'add' :
+          record.opType === '~' ? 'modify' :
+            record.opType === '-' ? 'delete' : 'reset'
+
+        recordElement.innerHTML = `
+            <span class="op-type ${opTypeClass}">${record.opType}</span>
+            <span class="path">${record.path}</span>
+            <span class="hash">${record.hash}</span>
+            <span class="timestamp">${record.timestamp}</span>
+            <span class="device">${record.device}</span>
+        `
+
+        elements.historyContent.appendChild(recordElement)
+      })
+
+      // 滚动到底部
+      elements.historyContent.scrollTop = elements.historyContent.scrollHeight
+    }
+
+    // 选择路径
+    function selectPath(path) {
+      state.selectedPath = path
+
+      // 更新UI以反映选择
+      document.querySelectorAll('.tree-node-header').forEach(el => {
+        el.classList.toggle('selected', el.getAttribute('data-path') === path)
+      })
+
+      // 更新路径输入框
+      elements.path.value = path
+
+      // 如果选择了目录，则更新parentDir选择框
+      if (path.endsWith('/')) {
+        elements.parentDir.value = path
+      }
+
+      // 如果选择了代码片段，则更新代码框
+      updateFormForSelectedPath()
+    }
+
+    // 根据选择的路径更新表单
+    function updateFormForSelectedPath() {
+      const path = state.selectedPath
+
+      // 如果选择了代码片段
+      if (!path.endsWith('/')) {
+        // 查找该代码片段
+        const snippet = state.snippets.find(s => {
+          const fullPath = s.path
+          return fullPath === path
+        })
+
+        if (snippet) {
+          // 设置代码内容和语言
+          elements.code.value = snippet.code
+          elements.language.value = snippet.language
+
+          // 将操作类型设置为修改代码片段
+          elements.actionType.value = 'modifySnippet'
+
+          // 更新表单显示
+          updateFormDisplay()
+        }
+      } else {
+        // 如果选择了目录，默认为新增代码片段
+        elements.actionType.value = 'addSnippet'
+        elements.code.value = ''
+
+        // 更新表单显示
+        updateFormDisplay()
+      }
+    }
+
+    // 更新表单显示
+    function updateFormDisplay() {
+      const actionType = elements.actionType.value
+
+      // 显示/隐藏代码输入区域
+      elements.codeGroup.style.display =
+        (actionType === 'addSnippet' || actionType === 'modifySnippet')
+          ? 'flex'
+          : 'none'
+
+      // 显示/隐藏语言选择
+      elements.languageGroup.style.display =
+        (actionType === 'addSnippet' || actionType === 'modifySnippet')
+          ? 'flex'
+          : 'none'
+
+      // 更新路径输入区域
+      if (actionType === 'forceReset') {
+        // 强制重置不需要路径
+        elements.pathGroup.style.display = 'none'
+      } else if (actionType === 'addDir') {
+        // 新增目录需要选择父目录和输入目录名
+        elements.pathGroup.style.display = 'flex'
+        elements.parentDir.style.display = 'block'
+        elements.itemName.style.display = 'block'
+        elements.path.style.display = 'none'
+
+        elements.itemName.placeholder = "目录名称"
+      } else if (actionType === 'deleteItem') {
+        // 删除操作使用当前路径
+        elements.pathGroup.style.display = 'flex'
+        elements.parentDir.style.display = 'none'
+        elements.itemName.style.display = 'none'
+        elements.path.style.display = 'block'
+      } else {
+        // 其他操作
+        elements.pathGroup.style.display = 'flex'
+
+        if (actionType === 'addSnippet') {
+          // 新增代码片段需要选择父目录和输入文件名
+          elements.parentDir.style.display = 'block'
+          elements.itemName.style.display = 'block'
+          elements.path.style.display = 'none'
+
+          elements.itemName.placeholder = "文件名"
+        } else {
+          // 修改代码片段使用当前路径
+          elements.parentDir.style.display = 'none'
+          elements.itemName.style.display = 'none'
+          elements.path.style.display = 'block'
+        }
+      }
+    }
+
+    // 修改删除函数，移除showNotification调用
+    async function deleteItem() {
+      const path = elements.path.value
+      
+      if (!path || path === '/') {
+        throw new Error('无法删除根目录')
+      }
+      
+      // 确认删除
+      if (!confirm(`确定要删除 "${path}" 吗？${path.endsWith('/') ? '这将同时删除该目录下的所有内容。' : ''}`)) {
+        return
+      }
+      
+      if (path.endsWith('/')) {
+        // 删除目录
+        await deleteDirectory(path)
+      } else {
+        // 删除代码片段
+        await deleteSnippet(path)
+      }
+    }
+    
+    // 删除代码片段
+    async function deleteSnippet(path) {
+      // 查找代码片段
+      const snippetIndex = state.snippets.findIndex(s => s.path === path)
+      
+      if (snippetIndex === -1) {
+        throw new Error('代码片段不存在')
+      }
+      
+      // 获取代码片段内容，用于计算哈希
+      const snippet = state.snippets[snippetIndex]
+      const snippetContent = snippet.code
+      
+      // 从列表中移除
+      state.snippets.splice(snippetIndex, 1)
+      
+      // 添加删除记录，传递内容以便计算哈希
+      await addHistoryRecord('-', path, snippetContent)
+      
+      // 选择父目录
+      const parentPath = path.substring(0, path.lastIndexOf('/') + 1)
+      selectPath(parentPath)
+      
+      // 显示通知
+      showNotification(`代码片段 ${path} 已删除`, 'success')
+    }
+    
+    // 删除目录及其内容
+    async function deleteDirectory(dirPath) {
+      // 1. 先收集该目录下的所有项目（包括子目录和代码片段）
+      const itemsToDelete = []
+      
+      // 收集代码片段
+      const snippetsToDelete = state.snippets.filter(s => s.path.startsWith(dirPath))
+      snippetsToDelete.forEach(snippet => {
+        itemsToDelete.push({
+          type: 'snippet',
+          path: snippet.path
+        })
+      })
+      
+      // 收集子目录（按路径长度降序排列，确保先删除深层目录）
+      const subDirs = state.directories
+        .filter(d => d.startsWith(dirPath) && d !== dirPath)
+        .sort((a, b) => b.length - a.length)
+      
+      subDirs.forEach(dir => {
+        itemsToDelete.push({
+          type: 'directory',
+          path: dir
+        })
+      })
+      
+      // 最后添加要删除的目录本身
+      itemsToDelete.push({
+        type: 'directory',
+        path: dirPath
+      })
+      
+      // 2. 按照正确顺序删除项目并记录历史
+      for (const item of itemsToDelete) {
+        if (item.type === 'snippet') {
+          // 删除代码片段
+          const snippetIndex = state.snippets.findIndex(s => s.path === item.path)
+          if (snippetIndex !== -1) {
+            state.snippets.splice(snippetIndex, 1)
+            await addHistoryRecord('-', item.path)
+          }
+        } else {
+          // 删除目录
+          const dirIndex = state.directories.indexOf(item.path)
+          if (dirIndex !== -1) {
+            state.directories.splice(dirIndex, 1)
+            await addHistoryRecord('-', item.path)
+          }
+        }
+      }
+      
+      // 3. 选择父目录
+      const parentPath = dirPath.substring(0, dirPath.split('/').slice(0, -2).join('/').length + 1)
+      selectPath(parentPath || '/')
+      
+      // 显示通知
+      showNotification(`目录 ${dirPath} 及其内容已删除`, 'success')
+    }
+
+    // 执行操作
+    async function executeOperation() {
+      const actionType = elements.actionType.value
+      
+      try {
+        switch (actionType) {
+          case 'addDir':
+            await addDirectory()
+            break
+          case 'addSnippet':
+            await addSnippet()
+            break
+          case 'modifySnippet':
+            await modifySnippet()
+            break
+          case 'deleteItem':
+            await deleteItem()
+            break
+          case 'forceReset':
+            await forceReset()
+            break
+        }
+        
+        // 清空表单
+        elements.itemName.value = ''
+        elements.code.value = ''
+        
+        // 更新UI
+        renderDirectoryTree()
+      } catch (error) {
+        showNotification(error.message, 'error')
+        console.error(error)
+      }
+    }
+
+    // 添加目录
+    async function addDirectory() {
+      const parentDir = elements.parentDir.value
+      const dirName = elements.itemName.value.trim()
+
+      if (!dirName) {
+        throw new Error('目录名不能为空')
+      }
+
+      if (dirName.includes('/')) {
+        throw new Error('目录名不能包含斜杠')
+      }
+
+      const newDirPath = `${parentDir}${dirName}/`
+
+      // 检查目录是否已存在
+      if (state.directories.includes(newDirPath)) {
+        throw new Error('目录已存在')
+      }
+
+      // 添加到目录列表
+      state.directories.push(newDirPath)
+
+      // 添加历史记录
+      await addHistoryRecord('+', newDirPath)
+
+      // 选择新创建的目录
+      selectPath(newDirPath)
+    }
+
+    // 添加代码片段
+    async function addSnippet() {
+      const parentDir = elements.parentDir.value
+      const fileName = elements.itemName.value.trim()
+      const code = elements.code.value
+      const language = elements.language.value
+
+      if (!fileName) {
+        throw new Error('文件名不能为空')
+      }
+
+      if (fileName.includes('/')) {
+        throw new Error('文件名不能包含斜杠')
+      }
+
+      const snippetPath = `${parentDir}${fileName}`
+
+      // 检查代码片段是否已存在
+      if (state.snippets.some(s => s.path === snippetPath)) {
+        throw new Error('代码片段已存在')
+      }
+
+      // 创建新的代码片段
+      const newSnippet = {
+        path: snippetPath,
+        code,
+        language,
+        createdAt: new Date().toISOString()
+      }
+
+      // 添加到代码片段列表
+      state.snippets.push(newSnippet)
+
+      // 添加历史记录
+      await addHistoryRecord('+', snippetPath, code)
+
+      // 选择新创建的代码片段
+      selectPath(snippetPath)
+    }
+
+    // 修改代码片段
+    async function modifySnippet() {
+      const path = elements.path.value
+      const code = elements.code.value
+      const language = elements.language.value
+
+      // 查找代码片段
+      const snippetIndex = state.snippets.findIndex(s => s.path === path)
+
+      if (snippetIndex === -1) {
+        throw new Error('代码片段不存在')
+      }
+
+      // 更新代码片段
+      state.snippets[snippetIndex].code = code
+      state.snippets[snippetIndex].language = language
+      state.snippets[snippetIndex].updatedAt = new Date().toISOString()
+
+      // 添加历史记录
+      await addHistoryRecord('~', path, code)
+    }
+
+    // 强制重置
+    async function forceReset() {
+      if (!confirm('确定要强制重置吗？这将清除所有数据并创建一个系统重置记录。')) {
+        return
+      }
+
+      // 清除所有数据
+      state.directories = ['/']
+      state.snippets = []
+      state.history = []
+
+      // 添加强制重置历史记录
+      await addHistoryRecord('!', 'SYSTEM_RESET')
+
+      // 选择根目录
+      selectPath('/')
+    }
+
+    // 清除所有数据
+    function resetAll() {
+      if (!confirm('确定要清除所有数据吗？这将删除所有目录、代码片段和历史记录。')) {
+        return
+      }
+
+      // 重置状态
+      state.directories = ['/']
+      state.snippets = []
+      state.history = []
+      state.selectedPath = '/'
+
+      // 更新UI
+      renderDirectoryTree()
+      renderHistoryRecords()
+      elements.path.value = '/'
+      elements.code.value = ''
+      elements.itemName.value = ''
+      
+      showNotification('所有数据已清除', 'warning')
+    }
+
+    // 导出历史记录
+    function exportHistory() {
+      const historyText = state.history.map(record =>
+        `${record.opType}|${record.path}|${record.hash}|${record.timestamp}|${record.device}`
+      ).join('\n')
+
+      const blob = new Blob([historyText], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'history.txt'
+      a.click()
+
+      URL.revokeObjectURL(url)
+    }
+
+    // 导入历史记录
+    function importHistory() {
+      elements.importFile.click()
+    }
+
+    // 处理导入文件
+    function handleImportFile(event) {
+      const file = event.target.files[0]
+      if (!file) return
+
+      const reader = new FileReader()
+
+      reader.onload = function (e) {
+        const content = e.target.result
+        parseImportedHistory(content)
+      }
+
+      reader.readAsText(file)
+    }
+
+    // 解析导入的历史记录
+    function parseImportedHistory(content) {
+      try {
+        const lines = content.split('\n').filter(line => line.trim())
+        
+        // 清除现有数据
+        resetAll()
+        
+        // 验证第一条记录是否符合规则
+        if (lines.length > 0) {
+          const firstRecord = lines[0].split('|')
+          const firstOpType = firstRecord[0]
+          
+          if (firstOpType !== '+' && firstOpType !== '!') {
+            throw new Error('历史记录的第一条必须是强制重置(!)或新增(+)操作')
+          }
+        }
+        
+        // 验证时间戳是否递增
+        let lastTimestamp = null
+        for (const line of lines) {
+          const parts = line.split('|')
+          const timestamp = parts[3]
+          
+          if (lastTimestamp !== null && new Date(timestamp) <= new Date(lastTimestamp)) {
+            throw new Error('历史记录必须按时间戳严格递增')
+          }
+          
+          lastTimestamp = timestamp
+        }
+        
+        // 解析每行并重建状态
+        for (const line of lines) {
+          const [opType, path, hash, timestamp, device] = line.split('|')
+          
+          // 添加到历史记录
+          state.history.push({
+            opType,
+            path,
+            hash,
+            timestamp,
+            device
+          })
+          
+          // 根据操作类型更新状态
+          if (opType === '+') {
+            if (path.endsWith('/')) {
+              // 添加目录
+              if (!state.directories.includes(path)) {
+                state.directories.push(path)
+              }
+            } else {
+              // 添加代码片段
+              state.snippets.push({
+                path,
+                code: '// 导入的代码内容',
+                language: 'javascript',
+                createdAt: timestamp
+              })
+            }
+          } else if (opType === '-') {
+            if (path.endsWith('/')) {
+              // 删除目录
+              const index = state.directories.indexOf(path)
+              if (index !== -1) {
+                state.directories.splice(index, 1)
+              }
+            } else {
+              // 删除代码片段
+              const index = state.snippets.findIndex(s => s.path === path)
+              if (index !== -1) {
+                state.snippets.splice(index, 1)
+              }
+            }
+          } else if (opType === '!') {
+            // 强制重置，重置所有状态
+            state.directories = ['/']
+            state.snippets = []
+            // 历史记录保留，因为我们正在导入它
+          }
+        }
+        
+        // 更新UI
+        renderDirectoryTree()
+        renderHistoryRecords()
+        
+        showNotification('历史记录导入成功', 'success')
+      } catch (error) {
+        showNotification(`导入失败: ${error.message}`, 'error')
+        console.error(error)
+      }
+      
+      // 清除文件输入
+      elements.importFile.value = ''
+    }
+
+    // 复制历史记录的原始内容
+    function copyHistoryRaw() {
+      const historyText = state.history.map(record =>
+        `${record.opType}|${record.path}|${record.hash}|${record.timestamp}|${record.device}`
+      ).join('\n')
+      
+      // 复制到剪贴板
+      navigator.clipboard.writeText(historyText)
+        .then(() => {
+          showNotification('历史记录已复制到剪贴板', 'success')
+        })
+        .catch(err => {
+          console.error('复制失败:', err)
+          
+          // 如果复制失败，提供备用方法
+          const textarea = document.createElement('textarea')
+          textarea.value = historyText
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          document.body.removeChild(textarea)
+          showNotification('历史记录已复制到剪贴板', 'success')
+        })
+    }
+
+    // 随机生成历史记录
+    async function generateRandomHistory() {
+      if (state.history.length > 0 || state.directories.length > 1 || state.snippets.length > 0) {
+        if (!confirm('生成随机历史记录将清除现有的所有数据，确定继续吗？')) {
+          return
+        }
+        resetAll()
+      }
+      
+      // 语言选项
+      const languages = ['javascript', 'typescript', 'html', 'css', 'python', 'java', 'csharp', 'cpp', 'go', 'rust', 'php', 'ruby']
+      
+      // 随机设备
+      const devices = ['device1', 'device2', 'device3']
+      
+      // 目录和文件名生成
+      const dirPrefixes = ['api', 'components', 'utils', 'models', 'views', 'services', 'helpers', 'config', 'lib', 'hooks']
+      const filePrefixes = ['user', 'auth', 'data', 'main', 'helper', 'util', 'config', 'base', 'app', 'index', 'service']
+      const fileSuffixes = ['', 'Controller', 'Service', 'Model', 'View', 'Component', 'Hook', 'Utils', 'Helper', 'Manager']
+      
+      // 随机代码片段模板
+      const codeTemplates = [
+        "function ${name}() {\n  console.log('Hello, world!');\n  return true;\n}",
+        "class ${name} {\n  constructor() {\n    this.value = 0;\n  }\n  \n  getValue() {\n    return this.value;\n  }\n}",
+        "const ${name} = () => {\n  const data = [];\n  return {\n    add: (item) => data.push(item),\n    getAll: () => data\n  };\n};",
+        "import { useState } from 'react';\n\nfunction ${name}() {\n  const [count, setCount] = useState(0);\n  return (\n    <div>\n      <p>Count: {count}</p>\n      <button onClick={() => setCount(count + 1)}>Increment</button>\n    </div>\n  );\n}",
+        "def ${name}(value):\n    \"\"\"A simple function example\"\"\"\n    return value * 2"
+      ]
+      
+      // 随机获取数组中的元素
+      const getRandomItem = (array) => array[Math.floor(Math.random() * array.length)]
+      
+      // 生成随机的名称
+      const generateRandomName = (isDir = false) => {
+        if (isDir) {
+          return getRandomItem(dirPrefixes)
+        } else {
+          return getRandomItem(filePrefixes) + getRandomItem(fileSuffixes)
+        }
+      }
+      
+      // 生成随机代码
+      const generateRandomCode = (name) => {
+        const template = getRandomItem(codeTemplates)
+        return template.replace('${name}', name)
+      }
+      
+      // 生成随机时间戳（确保时间戳是递增的）
+      let lastTimestamp = new Date().getTime() - 1000 * 60 * 60 * 24 * 30 // 从30天前开始
+      const generateTimestamp = () => {
+        lastTimestamp += Math.floor(Math.random() * 1000 * 60 * 60) + 1000 // 增加1秒到1小时的随机时间
+        return new Date(lastTimestamp).toISOString()
+      }
+      
+      // 决定是否执行强制重置
+      const shouldReset = Math.random() < 0.3 // 30%的概率执行强制重置
+      
+      if (shouldReset) {
+        // 执行强制重置
+        const timestamp = generateTimestamp()
+        const device = getRandomItem(devices)
+        
+        // 添加强制重置记录
+        state.history.push({
+          opType: '!',
+          path: 'SYSTEM_RESET',
+          hash: '#',
+          timestamp,
+          device
+        })
+      }
+      
+      // 创建随机目录结构（1-5个顶级目录，不允许嵌套目录）
+      const dirCount = Math.floor(Math.random() * 5) + 1
+      const directories = []
+      
+      for (let i = 0; i < dirCount; i++) {
+        let dirName
+        let attempts = 0
+        
+        // 确保目录名不重复
+        do {
+          dirName = generateRandomName(true)
+          attempts++
+        } while (directories.includes(dirName) && attempts < 10)
+        
+        if (attempts < 10) {
+          directories.push(dirName)
+        }
+      }
+      
+      // 为每个目录创建历史记录并生成文件
+      for (const dir of directories) {
+        const dirPath = `/${dir}/`
+        const timestamp = generateTimestamp()
+        const device = getRandomItem(devices)
+        
+        // 添加目录
+        state.directories.push(dirPath)
+        state.history.push({
+          opType: '+',
+          path: dirPath,
+          hash: '#',
+          timestamp,
+          device
+        })
+        
+        // 为目录添加1-5个文件
+        const fileCount = Math.floor(Math.random() * 5) + 1
+        const filesInDir = []
+        
+        for (let j = 0; j < fileCount; j++) {
+          let fileName
+          let attempts = 0
+          
+          // 确保文件名不重复
+          do {
+            fileName = generateRandomName(false)
+            attempts++
+          } while (filesInDir.includes(fileName) && attempts < 10)
+          
+          if (attempts < 10) {
+            filesInDir.push(fileName)
+            
+            const filePath = `${dirPath}${fileName}`
+            const language = getRandomItem(languages)
+            const code = generateRandomCode(fileName)
+            const fileTimestamp = generateTimestamp()
+            const fileDevice = getRandomItem(devices)
+            
+            // 计算文件内容的哈希
+            const hash = await calculateSHA256(code)
+            
+            // 添加文件
+            state.snippets.push({
+              path: filePath,
+              code,
+              language,
+              createdAt: fileTimestamp
+            })
+            
+            state.history.push({
+              opType: '+',
+              path: filePath,
+              hash,
+              timestamp: fileTimestamp,
+              device: fileDevice
+            })
+            
+            // 可能的修改操作（50%概率）
+            if (Math.random() < 0.5) {
+              const modifiedCode = code + '\n// Modified at ' + new Date().toISOString()
+              const modifyTimestamp = generateTimestamp()
+              const modifyDevice = getRandomItem(devices)
+              const modifyHash = await calculateSHA256(modifiedCode)
+              
+              // 更新代码片段
+              const snippetIndex = state.snippets.findIndex(s => s.path === filePath)
+              if (snippetIndex !== -1) {
+                state.snippets[snippetIndex].code = modifiedCode
+                state.snippets[snippetIndex].updatedAt = modifyTimestamp
+              }
+              
+              // 添加修改记录
+              state.history.push({
+                opType: '~',
+                path: filePath,
+                hash: modifyHash,
+                timestamp: modifyTimestamp,
+                device: modifyDevice
+              })
+            }
+          }
+        }
+      }
+      
+      // 随机删除操作（30%概率删除一个目录或文件）
+      if (Math.random() < 0.3 && directories.length > 0) {
+        // 随机选择一个目录删除
+        const dirToDelete = getRandomItem(directories)
+        const dirPath = `/${dirToDelete}/`
+        
+        // 查找该目录下的所有文件
+        const filesInDir = state.snippets.filter(s => s.path.startsWith(dirPath))
+        
+        // 按规则删除：先删除目录中的文件，再删除目录本身
+        for (const file of filesInDir) {
+          const deleteTimestamp = generateTimestamp()
+          const deleteDevice = getRandomItem(devices)
+          
+          // 获取代码内容用于哈希计算
+          const fileContent = file.code
+          
+          // 计算文件内容的哈希值
+          const deleteHash = await calculateSHA256(fileContent)
+          
+          // 添加文件删除记录
+          state.history.push({
+            opType: '-',
+            path: file.path,
+            hash: deleteHash,
+            timestamp: deleteTimestamp,
+            device: deleteDevice
+          })
+          
+          // 从列表中移除文件
+          const fileIndex = state.snippets.findIndex(s => s.path === file.path)
+          if (fileIndex !== -1) {
+            state.snippets.splice(fileIndex, 1)
+          }
+        }
+        
+        // 删除目录本身
+        const dirDeleteTimestamp = generateTimestamp()
+        const dirDeleteDevice = getRandomItem(devices)
+        
+        state.history.push({
+          opType: '-',
+          path: dirPath,
+          hash: '#',
+          timestamp: dirDeleteTimestamp,
+          device: dirDeleteDevice
+        })
+        
+        // 从列表中移除目录
+        const dirIndex = state.directories.indexOf(dirPath)
+        if (dirIndex !== -1) {
+          state.directories.splice(dirIndex, 1)
+        }
+      }
+      
+      // 更新UI
+      renderDirectoryTree()
+      renderHistoryRecords()
+      
+      showNotification(`已生成 ${state.history.length} 条随机历史记录！`, 'success')
+    }
+
+    // 添加通知功能
+    function showNotification(message, type = 'info', duration = 3000) {
+      // 先移除所有现有通知
+      const existingNotifications = document.querySelectorAll('.notification')
+      existingNotifications.forEach(notif => {
+        document.body.removeChild(notif)
+      })
+      
+      // 创建新通知
+      const notification = document.createElement('div')
+      notification.className = `notification ${type}`
+      notification.textContent = message
+      
+      // 添加到页面
+      document.body.appendChild(notification)
+      
+      // 显示通知
+      setTimeout(() => {
+        notification.classList.add('show')
+      }, 10)
+      
+      // 定时移除
+      setTimeout(() => {
+        notification.classList.remove('show')
+        setTimeout(() => {
+          if (notification.parentNode) {
+            document.body.removeChild(notification)
+          }
+        }, 300)
+      }, duration)
+    }
+    
+    // 复制树结构
+    function copyTreeStructure() {
+      let treeText = '根目录/\n'
+      
+      // 创建有序的目录列表
+      const sortedDirs = [...state.directories]
+        .filter(dir => dir !== '/')
+        .sort((a, b) => a.localeCompare(b))
+      
+      // 创建有序的文件列表
+      const sortedFiles = [...state.snippets]
+        .sort((a, b) => a.path.localeCompare(b.path))
+      
+      // 递归生成树
+      function buildTreeText(path, indent) {
+        // 添加当前目录下的子目录
+        const childDirs = sortedDirs.filter(dir => {
+          // 不是自己，但是以自己为前缀，并且深度只差一级
+          const parts = dir.split('/').filter(Boolean)
+          const parentParts = path.split('/').filter(Boolean)
+          return dir !== path && 
+                 dir.startsWith(path) && 
+                 parts.length === parentParts.length + 1
+        })
+        
+        childDirs.forEach(dir => {
+          const dirName = dir.split('/').filter(Boolean).pop()
+          treeText += `${indent}├── 📁 ${dirName}/\n`
+          buildTreeText(dir, indent + '│   ')
+        })
+        
+        // 添加当前目录下的文件
+        const files = sortedFiles.filter(file => {
+          const filePath = file.path
+          const fileDir = filePath.substring(0, filePath.lastIndexOf('/') + 1)
+          return fileDir === path
+        })
+        
+        const lastIndex = files.length - 1
+        files.forEach((file, index) => {
+          const fileName = file.path.split('/').pop()
+          const prefix = index === lastIndex && childDirs.length === 0 ? '└── ' : '├── '
+          treeText += `${indent}${prefix}📄 ${fileName}\n`
+        })
+      }
+      
+      buildTreeText('/', '');
+      
+      // 复制到剪贴板
+      navigator.clipboard.writeText(treeText)
+        .then(() => {
+          showNotification('树结构已复制到剪贴板', 'success')
+        })
+        .catch(err => {
+          console.error('复制失败:', err)
+          
+          // 如果复制失败，提供备用方法
+          const textarea = document.createElement('textarea')
+          textarea.value = treeText
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          document.body.removeChild(textarea)
+          showNotification('树结构已复制到剪贴板', 'success')
+        })
+    }
+
+    // 初始化应用
+    function initApp() {
+      // 渲染初始目录树
+      renderDirectoryTree()
+
+      // 注册事件监听器
+      elements.actionType.addEventListener('change', updateFormDisplay)
+      elements.executeBtn.addEventListener('click', executeOperation)
+      elements.resetBtn.addEventListener('click', resetAll)
+      elements.exportBtn.addEventListener('click', exportHistory)
+      elements.importBtn.addEventListener('click', importHistory)
+      elements.importFile.addEventListener('change', handleImportFile)
+      elements.addDirBtn.addEventListener('click', () => {
+        elements.actionType.value = 'addDir'
+        updateFormDisplay()
+      })
+      document.getElementById('copyTreeBtn').addEventListener('click', copyTreeStructure)
+      document.getElementById('generateRandomBtn').addEventListener('click', generateRandomHistory)
+      document.getElementById('copyHistoryBtn').addEventListener('click', copyHistoryRaw)
+
+      // 初始更新表单显示
+      updateFormDisplay()
+    }
+
+    // 启动应用
+    document.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+
+</html>

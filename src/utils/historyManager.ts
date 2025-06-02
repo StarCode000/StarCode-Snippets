@@ -29,7 +29,7 @@ export interface ChangeSet {
   deletedDirectories: Array<{ path: string }>
 }
 
-export class ChangelogManager {
+export class HistoryManager {
   public static readonly HASH_PLACEHOLDER = '#'
 
   /**
@@ -298,7 +298,7 @@ export class ChangelogManager {
       if (!currentFilePaths.has(lastSyncPath)) {
         changeSet.deletedFiles.push({
           path: lastSyncPath,
-          hash: fileInfo.hash,
+          hash: fileInfo.hash, // 使用历史记录中的哈希值
         })
       }
     }
@@ -377,7 +377,7 @@ export class ChangelogManager {
       entries.push({
         operation: OperationType.DELETE,
         fullPath: path,
-        hash: this.HASH_PLACEHOLDER,
+        hash: hash,
         timestamp,
         deviceTag: entryDeviceTag,
       })

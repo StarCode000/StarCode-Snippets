@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 import { CloudSyncManager } from '../utils/cloudSyncManager'
-import { ChangelogManager, HistoryEntry, OperationType } from '../utils/changelogManager'
+import { HistoryManager, HistoryEntry, OperationType } from '../utils/historyManager'
 import { SettingsManager } from '../utils/settingsManager'
 import { StorageManager } from '../storage/storageManager'
 
@@ -312,7 +312,7 @@ export class HistoryWebviewProvider {
     }
 
     try {
-      return ChangelogManager.parseHistory(historyText)
+      return HistoryManager.parseHistory(historyText)
     } catch (error) {
       console.error('解析历史记录失败:', error)
       return []

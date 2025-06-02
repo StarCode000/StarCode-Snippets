@@ -9,7 +9,7 @@ import {
 import * as vscode from 'vscode'
 import { CloudSyncConfig, CloudSyncStatus, CodeSnippet, Directory } from '../types/types'
 import { SettingsManager } from './settingsManager'
-import { ChangelogManager, OperationType, HistoryEntry, ChangeSet } from './changelogManager'
+import { HistoryManager, OperationType, HistoryEntry, ChangeSet } from './historyManager'
 import { DiffMergeManager, MergeResult } from './diffMergeManager'
 import { ContextManager } from './contextManager'
 import { DeviceManager } from './deviceManager'
@@ -374,7 +374,7 @@ export class CloudSyncManager {
   public async detectLocalChanges(currentSnippets: CodeSnippet[], currentDirectories: Directory[]): Promise<ChangeSet> {
     const lastSyncHistory = this.getLocalSyncHistory()
 
-    return ChangelogManager.compareWithActualState(currentSnippets, currentDirectories, lastSyncHistory)
+    return HistoryManager.compareWithActualState(currentSnippets, currentDirectories, lastSyncHistory)
   }
 
   /**
@@ -555,7 +555,7 @@ export class CloudSyncManager {
       let remoteHistory = (await this.downloadFile(this.HISTORY_FILE_KEY)) || ''
 
       // 生成新的历史记录条目
-      const newEntries = ChangelogManager.changeSetToHistoryEntries(changeSet, this.context || undefined)
+      const newEntries = HistoryManager.changeSetToHistoryEntries(changeSet, this.context || undefined)
 
       // 执行S3文件操作
       for (const entry of newEntries) {
@@ -564,7 +564,7 @@ export class CloudSyncManager {
 
       // 更新历史记录
       for (const entry of newEntries) {
-        remoteHistory = ChangelogManager.addEntry(
+        remoteHistory = HistoryManager.addEntry(
           remoteHistory,
           entry.operation,
           entry.fullPath,
@@ -620,9 +620,9 @@ export class CloudSyncManager {
       }
 
       // 2. 解析远端历史记录
-      const remoteEntries = ChangelogManager.parseHistory(remoteHistory)
+      const remoteEntries = HistoryManager.parseHistory(remoteHistory)
       const localHistory = this.getLocalSyncHistory()
-      const localEntries = ChangelogManager.parseHistory(localHistory)
+      const localEntries = HistoryManager.parseHistory(localHistory)
 
       // 3. 找出需要应用的变更（远端有但本地没有的）
       const newEntries = this.findNewEntries(remoteEntries, localEntries)
@@ -843,7 +843,7 @@ export class CloudSyncManager {
         if (!entry.fullPath.endsWith('/')) {
           // 文件操作
           const snippet = currentSnippets.find(
-            (s) => ChangelogManager.generateFullPath(s, currentDirectories) === entry.fullPath
+            (s) => HistoryManager.generateFullPath(s, currentDirectories) === entry.fullPath
           )
 
           if (snippet) {
@@ -891,14 +891,14 @@ export class CloudSyncManager {
 
     // 添加文件信息
     for (const snippet of currentSnippets) {
-      const fullPath = ChangelogManager.generateFullPath(snippet, currentDirectories)
-      const hash = ChangelogManager.calculateItemHash(snippet)
+      const fullPath = HistoryManager.generateFullPath(snippet, currentDirectories)
+      const hash = HistoryManager.calculateItemHash(snippet)
       metadata.files[fullPath] = { hash }
     }
 
     // 添加目录信息
     for (const directory of currentDirectories) {
-      const fullPath = ChangelogManager.generateFullPath(directory, currentDirectories)
+      const fullPath = HistoryManager.generateFullPath(directory, currentDirectories)
       metadata.directories[fullPath] = {}
     }
 
@@ -1063,7 +1063,7 @@ export class CloudSyncManager {
       // 检查目录是否已存在（按路径检查）
       const existingDirs = await this.storageManager.getAllDirectories()
       const exists = existingDirs.some((d: Directory) => {
-        const existingPath = ChangelogManager.generateFullPath(d, existingDirs)
+        const existingPath = HistoryManager.generateFullPath(d, existingDirs)
         return existingPath === entry.fullPath
       })
 
@@ -1170,7 +1170,7 @@ export class CloudSyncManager {
 
     // 从路径找到对应的目录
     const directory = directories.find((d: Directory) => {
-      const dirPath = ChangelogManager.generateFullPath(d, directories)
+      const dirPath = HistoryManager.generateFullPath(d, directories)
       return dirPath === fullPath
     })
 
@@ -1193,7 +1193,7 @@ export class CloudSyncManager {
 
     // 从路径找到对应的代码片段
     const snippet = snippets.find((s: CodeSnippet) => {
-      const snippetPath = ChangelogManager.generateFullPath(s, directories)
+      const snippetPath = HistoryManager.generateFullPath(s, directories)
       return snippetPath === fullPath
     })
 
@@ -1320,7 +1320,7 @@ export class CloudSyncManager {
       try {
         // 检查目录是否已存在
         const exists = existingDirs.some((d: Directory) => {
-          const existingPath = ChangelogManager.generateFullPath(d, existingDirs)
+          const existingPath = HistoryManager.generateFullPath(d, existingDirs)
           return existingPath === dirPath
         })
 
@@ -1345,7 +1345,7 @@ export class CloudSyncManager {
               // 如果在映射中找不到，可能是因为父目录已经存在
               // 尝试在现有目录中查找
               const parentDir = existingDirs.find((d: Directory) => {
-                const existingPath = ChangelogManager.generateFullPath(d, existingDirs)
+                const existingPath = HistoryManager.generateFullPath(d, existingDirs)
                 return existingPath === parentPath
               })
 
@@ -1375,7 +1375,7 @@ export class CloudSyncManager {
         } else {
           // 目录已存在，记录ID以供子目录使用
           const existingDir = existingDirs.find((d: Directory) => {
-            const existingPath = ChangelogManager.generateFullPath(d, existingDirs)
+            const existingPath = HistoryManager.generateFullPath(d, existingDirs)
             return existingPath === dirPath
           })
 
@@ -1419,7 +1419,7 @@ export class CloudSyncManager {
 
     // 查找匹配的目录
     for (const dir of directories) {
-      const dirPath = ChangelogManager.generateFullPath(dir, directories)
+      const dirPath = HistoryManager.generateFullPath(dir, directories)
       if (dirPath === parentPath) {
         console.log(`修正parentId: ${snippetData.name} -> 目录: ${dir.name} (${dir.id})`)
         return {
@@ -1578,7 +1578,7 @@ export class CloudSyncManager {
     }
 
     try {
-      const remoteEntries = ChangelogManager.parseHistory(remoteHistory)
+      const remoteEntries = HistoryManager.parseHistory(remoteHistory)
 
       // 过滤出文件条目（非目录，非强制清空）
       const fileEntries = remoteEntries.filter(
@@ -1775,7 +1775,7 @@ export class CloudSyncManager {
       return null // 云端没有历史记录
     }
 
-    const remoteEntries = ChangelogManager.parseHistory(remoteHistory)
+    const remoteEntries = HistoryManager.parseHistory(remoteHistory)
     if (remoteEntries.length === 0) {
       return null
     }
@@ -1787,7 +1787,7 @@ export class CloudSyncManager {
     }
 
     const localHistory = this.getLocalSyncHistory()
-    const localEntries = ChangelogManager.parseHistory(localHistory)
+    const localEntries = HistoryManager.parseHistory(localHistory)
 
     // 判断是否需要执行云端强制清空
     let shouldApplyRemoteReset = false
@@ -1873,8 +1873,8 @@ export class CloudSyncManager {
 
       // 删除所有目录（按层级倒序删除）
       const sortedDirs = directories.sort((a: Directory, b: Directory) => {
-        const aPath = ChangelogManager.generateFullPath(a, directories)
-        const bPath = ChangelogManager.generateFullPath(b, directories)
+        const aPath = HistoryManager.generateFullPath(a, directories)
+        const bPath = HistoryManager.generateFullPath(b, directories)
         const aDepth = (aPath.match(/\//g) || []).length
         const bDepth = (bPath.match(/\//g) || []).length
         return bDepth - aDepth // 深层目录先删除
@@ -1909,7 +1909,7 @@ export class CloudSyncManager {
     console.log('从云端重新导入数据...')
 
     try {
-      const remoteEntries = ChangelogManager.parseHistory(remoteHistory)
+      const remoteEntries = HistoryManager.parseHistory(remoteHistory)
 
       // 过滤掉强制清空记录和删除操作
       const validEntries = remoteEntries.filter(
@@ -1969,7 +1969,7 @@ export class CloudSyncManager {
       // 输出目录信息用于调试
       console.log('已创建的目录:')
       createdDirectories.forEach((dir: any) => {
-        const dirPath = ChangelogManager.generateFullPath(dir, createdDirectories)
+        const dirPath = HistoryManager.generateFullPath(dir, createdDirectories)
         console.log(`  - 名称=${dir.name}, ID=${dir.id}, 父ID=${dir.parentId}, 路径=${dirPath}`)
       })
 
@@ -2062,7 +2062,7 @@ export class CloudSyncManager {
   private createForceClearHistory(): string {
     const timestamp = new Date().toISOString()
     const deviceTag = DeviceManager.getDeviceTag(this.context || undefined)
-    const forceClearEntry = `${OperationType.FORCE_CLEAR} | SYSTEM_RESET | ${ChangelogManager.HASH_PLACEHOLDER} | ${timestamp} | ${deviceTag}`
+    const forceClearEntry = `${OperationType.FORCE_CLEAR} | SYSTEM_RESET | ${HistoryManager.HASH_PLACEHOLDER} | ${timestamp} | ${deviceTag}`
 
     console.log('创建强制清空记录:', forceClearEntry)
     return forceClearEntry
@@ -2095,20 +2095,20 @@ export class CloudSyncManager {
 
       // 按层级顺序添加目录
       const sortedDirs = currentDirectories.sort((a, b) => {
-        const aPath = ChangelogManager.generateFullPath(a, currentDirectories)
-        const bPath = ChangelogManager.generateFullPath(b, currentDirectories)
+        const aPath = HistoryManager.generateFullPath(a, currentDirectories)
+        const bPath = HistoryManager.generateFullPath(b, currentDirectories)
         const aDepth = (aPath.match(/\//g) || []).length
         const bDepth = (bPath.match(/\//g) || []).length
         return aDepth - bDepth
       })
 
       for (const directory of sortedDirs) {
-        const fullPath = ChangelogManager.generateFullPath(directory, currentDirectories)
-        history = ChangelogManager.addEntry(
+        const fullPath = HistoryManager.generateFullPath(directory, currentDirectories)
+        history = HistoryManager.addEntry(
           history,
           OperationType.ADD,
           fullPath,
-          ChangelogManager.HASH_PLACEHOLDER,
+          HistoryManager.HASH_PLACEHOLDER,
           timestamp,
           undefined,
           this.context || undefined
@@ -2117,8 +2117,8 @@ export class CloudSyncManager {
 
       // 添加所有代码片段
       for (const snippet of currentSnippets) {
-        const fullPath = ChangelogManager.generateFullPath(snippet, currentDirectories)
-        const hash = ChangelogManager.calculateItemHash(snippet)
+        const fullPath = HistoryManager.generateFullPath(snippet, currentDirectories)
+        const hash = HistoryManager.calculateItemHash(snippet)
 
         // 上传代码片段文件
         const key = this.generateSnippetKey(fullPath)
@@ -2126,7 +2126,7 @@ export class CloudSyncManager {
         await this.uploadFile(key, content)
 
         // 添加到历史记录
-        history = ChangelogManager.addEntry(
+        history = HistoryManager.addEntry(
           history,
           OperationType.ADD,
           fullPath,
