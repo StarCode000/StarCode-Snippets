@@ -14,3 +14,5 @@ vsc-extension-quickstart.md
 **/.vscode-test.*
 !assets/**
 !media/**
+*.md
+*.vsix

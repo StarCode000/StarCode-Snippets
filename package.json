@@ -192,7 +192,7 @@
       },
       {
         "command": "starcode-snippets.showSyncStatus",
-                "title": "查看同步状态详情",
+        "title": "查看同步状态详情",
         "category": "StarCode Snippets",
         "icon": "$(pulse)"
       }
@@ -461,7 +461,10 @@
         },
         "starcode-snippets.storageVersion": {
           "type": "string",
-          "enum": ["v1", "v2"],
+          "enum": [
+            "v1",
+            "v2"
+          ],
           "default": "v2",
           "description": "存储数据格式版本"
         }
@@ -493,6 +496,7 @@
     "copy-webpack-plugin": "^12.0.2",
     "css-loader": "^7.1.2",
     "eslint": "^9.19.0",
+    "monaco-editor-webpack-plugin": "^7.1.0",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
