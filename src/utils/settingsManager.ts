@@ -11,16 +11,16 @@ export class SettingsManager {
    */
   private static getDefaultConfig(): CloudSyncConfig {
     return {
-      endpoint: '',
-      accessKey: '',
-      secretKey: '',
-      bucket: '',
-      region: '',
-      timeout: 30,
-      addressing: 'virtual-hosted-style',
+      provider: '',
+      repositoryUrl: '',
+      token: '',
+      localPath: '',
+      defaultBranch: 'main',
+      authenticationMethod: 'token',
+      sshKeyPath: '',
       autoSync: false,
-      syncInterval: 60,
-      concurrency: 3,
+      syncInterval: 15, // 15分钟
+      commitMessageTemplate: 'Sync snippets: {timestamp}',
     }
   }
 
@@ -72,40 +72,37 @@ export class SettingsManager {
   static validateConfig(config: CloudSyncConfig): { isValid: boolean; errors: string[] } {
     const errors: string[] = []
 
-    if (!config.endpoint.trim()) {
-      errors.push('Endpoint 不能为空')
+    if (!config.provider.trim()) {
+      errors.push('Git 平台不能为空')
     }
 
-    if (!config.accessKey.trim()) {
-      errors.push('Access Key 不能为空')
+    if (!config.repositoryUrl.trim()) {
+      errors.push('仓库 URL 不能为空')
     }
 
-    if (!config.secretKey.trim()) {
-      errors.push('Secret Key 不能为空')
+    if (!config.localPath.trim()) {
+      errors.push('本地仓库路径不能为空')
     }
 
-    if (!config.bucket.trim()) {
-      errors.push('Bucket 不能为空')
+    if (!config.defaultBranch.trim()) {
+      errors.push('默认分支名不能为空')
     }
 
-    if (!config.region.trim()) {
-      errors.push('Region ID 不能为空')
+    // 验证认证方式相关字段
+    if (config.authenticationMethod === 'token' && !config.token.trim()) {
+      errors.push('使用令牌认证时，访问令牌不能为空')
     }
 
-    if (config.timeout <= 0) {
-      errors.push('连接超时时间必须大于0')
+    if (config.authenticationMethod === 'ssh' && !config.sshKeyPath.trim()) {
+      errors.push('使用SSH认证时，SSH密钥路径不能为空')
     }
 
     if (config.syncInterval <= 0) {
-      errors.push('自动同步间隔必须大于0秒')
+      errors.push('自动同步间隔必须大于0分钟')
     }
 
-    if (config.syncInterval > 3600) {
-      errors.push('自动同步间隔不能超过3600秒（1小时）')
-    }
-
-    if (config.concurrency <= 0) {
-      errors.push('请求并发数必须大于0')
+    if (config.syncInterval > 1440) {
+      errors.push('自动同步间隔不能超过1440分钟（24小时）')
     }
 
     return {

@@ -355,54 +355,58 @@
         "starcode-snippets.cloudSync": {
           "type": "object",
           "default": {
-            "endpoint": "",
-            "accessKey": "",
-            "secretKey": "",
-            "bucket": "",
-            "region": "",
-            "timeout": 30,
-            "addressing": "virtual-hosted-style",
+            "provider": "",
+            "repositoryUrl": "",
+            "token": "",
+            "localPath": "",
+            "defaultBranch": "main",
+            "authenticationMethod": "token",
+            "sshKeyPath": "",
             "autoSync": false,
-            "syncInterval": 60,
-            "concurrency": 3
+            "syncInterval": 15,
+            "commitMessageTemplate": "Sync snippets: {timestamp}"
           },
-          "description": "云端同步配置",
+          "description": "Git 云端同步配置",
           "properties": {
-            "endpoint": {
-              "type": "string",
-              "description": "S3兼容存储服务的端点地址"
-            },
-            "accessKey": {
-              "type": "string",
-              "description": "访问密钥"
-            },
-            "secretKey": {
-              "type": "string",
-              "description": "密钥"
-            },
-            "bucket": {
-              "type": "string",
-              "description": "存储桶名称"
-            },
-            "region": {
-              "type": "string",
-              "description": "区域标识符"
-            },
-            "timeout": {
-              "type": "number",
-              "description": "连接超时时间（秒）",
-              "minimum": 1,
-              "maximum": 300,
-              "default": 30
-            },
-            "addressing": {
+            "provider": {
               "type": "string",
               "enum": [
-                "virtual-hosted-style",
-                "path-style"
+                "",
+                "github",
+                "gitlab",
+                "gitee"
               ],
-              "description": "URL寻址方式",
-              "default": "virtual-hosted-style"
+              "description": "Git 平台提供商"
+            },
+            "repositoryUrl": {
+              "type": "string",
+              "description": "Git 仓库 URL"
+            },
+            "token": {
+              "type": "string",
+              "description": "访问令牌"
+            },
+            "localPath": {
+              "type": "string",
+              "description": "本地 Git 仓库路径"
+            },
+            "defaultBranch": {
+              "type": "string",
+              "description": "默认分支名",
+              "default": "main"
+            },
+            "authenticationMethod": {
+              "type": "string",
+              "enum": [
+                "token",
+                "ssh"
+              ],
+              "description": "认证方式",
+              "default": "token"
+            },
+            "sshKeyPath": {
+              "type": "string",
+              "description": "SSH 密钥路径"
             },
             "autoSync": {
               "type": "boolean",
@@ -411,17 +415,15 @@
             },
             "syncInterval": {
               "type": "number",
-              "description": "自动同步间隔（秒）",
-              "minimum": 10,
-              "maximum": 3600,
-              "default": 60
+              "description": "自动同步间隔（分钟）",
+              "minimum": 5,
+              "maximum": 1440,
+              "default": 15
             },
-            "concurrency": {
-              "type": "number",
-              "description": "请求并发数",
-              "minimum": 1,
-              "maximum": 10,
-              "default": 3
+            "commitMessageTemplate": {
+              "type": "string",
+              "description": "提交信息模板",
+              "default": "Sync snippets: {timestamp}"
             }
           }
         },
@@ -505,10 +507,10 @@
     "webpack-cli": "5.0.1"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.817.0",
     "diff": "^5.1.0",
     "monaco-editor": "^0.52.2",
     "node-diff3": "^3.1.2",
+    "simple-git": "^3.27.0",
     "uuid": "^11.1.0"
   }
 }

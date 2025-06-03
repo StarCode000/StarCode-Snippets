@@ -61,18 +61,18 @@ export interface ExportDataV2 {
 
 export type ExportData = ExportDataV1 | ExportDataV2
 
-// 云端同步配置接口
+// 云端同步配置接口 (Updated for Git)
 export interface CloudSyncConfig {
-  endpoint: string
-  accessKey: string
-  secretKey: string
-  bucket: string
-  region: string
-  timeout: number // 连接超时时间（秒）
-  addressing: 'path-style' | 'virtual-hosted-style'
-  autoSync: boolean
-  syncInterval: number // 自动同步间隔（秒）
-  concurrency: number // 请求并发数
+  provider: 'github' | 'gitlab' | 'gitee' | '' // Git 平台
+  repositoryUrl: string // 仓库 URL
+  token: string // 访问令牌
+  localPath: string // 本地Git仓库路径
+  defaultBranch: string // 默认分支名
+  authenticationMethod: 'token' | 'ssh' // 认证方式
+  sshKeyPath: string // SSH密钥路径 (当使用SSH认证时)
+  autoSync: boolean // 是否启用自动同步
+  syncInterval: number // 自动同步间隔（分钟）
+  commitMessageTemplate: string // 提交信息模板
 }
 
 // 云端同步状态

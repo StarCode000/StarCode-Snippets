@@ -70,12 +70,6 @@ export class SettingsWebviewProvider {
         case 'importSettings':
           await this._importSettings(panel)
           break
-        case 'forceResetCloudSync':
-          await this._forceResetCloudSync(panel)
-          break
-        case 'abandonLocalAndImport':
-          await this._abandonLocalAndImport(panel)
-          break
       }
     })
 
@@ -205,16 +199,16 @@ export class SettingsWebviewProvider {
 
       // 重置配置
       const defaultConfig: CloudSyncConfig = {
-        endpoint: '',
-        accessKey: '',
-        secretKey: '',
-        bucket: '',
-        region: '',
-        timeout: 30,
-        addressing: 'virtual-hosted-style',
+        provider: '',
+        repositoryUrl: '',
+        token: '',
+        localPath: '',
+        defaultBranch: 'main',
+        authenticationMethod: 'token',
+        sshKeyPath: '',
         autoSync: false,
-        syncInterval: 60,
-        concurrency: 3,
+        syncInterval: 15,
+        commitMessageTemplate: 'Sync snippets: {timestamp}',
       }
 
       await SettingsManager.saveCloudSyncConfig(defaultConfig)
@@ -245,7 +239,7 @@ export class SettingsWebviewProvider {
     const status = SettingsManager.getCloudSyncStatus()
 
     panel.webview.postMessage({
-      type: 'configData',
+      type: 'config',
       config,
       status,
     })
@@ -345,20 +339,20 @@ export class SettingsWebviewProvider {
 
       // 创建完整的导出数据
       const exportData = {
-        version: '1.0',
+        version: '2.0',
         exportTime: new Date().toISOString(),
         warning: '⚠️ 此文件包含敏感信息，请妥善保管！',
         config: {
-          endpoint: config.endpoint,
-          accessKey: config.accessKey,
-          secretKey: config.secretKey,
-          bucket: config.bucket,
-          region: config.region,
-          timeout: config.timeout,
-          addressing: config.addressing,
+          provider: config.provider,
+          repositoryUrl: config.repositoryUrl,
+          token: config.token,
+          localPath: config.localPath,
+          defaultBranch: config.defaultBranch,
+          authenticationMethod: config.authenticationMethod,
+          sshKeyPath: config.sshKeyPath,
           autoSync: config.autoSync,
           syncInterval: config.syncInterval,
-          concurrency: config.concurrency,
+          commitMessageTemplate: config.commitMessageTemplate,
         },
         status: {
           isConnected: status.isConnected,
@@ -456,22 +450,45 @@ export class SettingsWebviewProvider {
       // 获取当前配置
       const currentConfig = SettingsManager.getCloudSyncConfig()
 
-      // 检查导入数据是否包含敏感信息
-      const hasCredentials = importData.config.accessKey || importData.config.secretKey
+      // 检查导入数据的版本和格式
+      const isLegacyS3Config = importData.config.endpoint || importData.config.accessKey
+      const isGitConfig = importData.config.provider || importData.config.repositoryUrl
 
-      // 合并配置
-      const newConfig = {
-        endpoint: importData.config.endpoint || currentConfig.endpoint || '',
-        accessKey: importData.config.accessKey || currentConfig.accessKey || '',
-        secretKey: importData.config.secretKey || currentConfig.secretKey || '',
-        bucket: importData.config.bucket || currentConfig.bucket || '',
-        region: importData.config.region || currentConfig.region || '',
-        timeout: importData.config.timeout || currentConfig.timeout || 30,
-        addressing: importData.config.addressing || currentConfig.addressing || 'virtual-hosted-style',
-        autoSync:
-          importData.config.autoSync !== undefined ? importData.config.autoSync : currentConfig.autoSync || false,
-        syncInterval: importData.config.syncInterval || currentConfig.syncInterval || 60,
-        concurrency: importData.config.concurrency || currentConfig.concurrency || 3,
+      let newConfig: CloudSyncConfig
+      let hasCredentials = false
+      let importMessage = '设置导入成功'
+      let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`
+
+      if (isGitConfig) {
+        // 新的Git配置格式
+        hasCredentials = !!(importData.config.token || importData.config.sshKeyPath)
+        
+        newConfig = {
+          provider: importData.config.provider || currentConfig.provider || '',
+          repositoryUrl: importData.config.repositoryUrl || currentConfig.repositoryUrl || '',
+          token: importData.config.token || currentConfig.token || '',
+          localPath: importData.config.localPath || currentConfig.localPath || '',
+          defaultBranch: importData.config.defaultBranch || currentConfig.defaultBranch || 'main',
+          authenticationMethod: importData.config.authenticationMethod || currentConfig.authenticationMethod || 'token',
+          sshKeyPath: importData.config.sshKeyPath || currentConfig.sshKeyPath || '',
+          autoSync: importData.config.autoSync !== undefined ? importData.config.autoSync : currentConfig.autoSync || false,
+          syncInterval: importData.config.syncInterval || currentConfig.syncInterval || 15,
+          commitMessageTemplate: importData.config.commitMessageTemplate || currentConfig.commitMessageTemplate || 'Sync snippets: {timestamp}',
+        }
+
+        if (hasCredentials) {
+          importMessage += '（包含Git访问凭据）'
+          notificationMessage += '\n\n✅ 已导入完整的Git配置，包括访问凭据'
+        } else {
+          importMessage += '（未包含访问凭据，已保留当前设置）'
+          notificationMessage += '\n\n⚠️ 导入的配置不包含访问凭据，已保留当前设置的凭据信息'
+        }
+      } else if (isLegacyS3Config) {
+        // 旧的S3配置格式 - 提示用户无法直接转换
+        throw new Error('检测到旧的S3配置格式。由于同步方式已更改为Git，无法直接导入S3配置。请手动配置新的Git同步设置。')
+      } else {
+        // 未知格式
+        throw new Error('配置文件格式无法识别。请确保导入正确的配置文件。')
       }
 
       // 验证配置
@@ -487,18 +504,6 @@ export class SettingsWebviewProvider {
 
       // 更新页面显示
       await this._sendConfigToWebview(panel)
-
-      // 生成导入结果消息
-      let importMessage = '设置导入成功'
-      let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`
-
-      if (hasCredentials) {
-        importMessage += '（包含访问密钥）'
-        notificationMessage += '\n\n✅ 已导入完整配置，包括访问密钥信息'
-      } else {
-        importMessage += '（未包含访问密钥，已保留当前密钥）'
-        notificationMessage += '\n\n⚠️ 导入的配置不包含访问密钥，已保留当前设置的密钥信息'
-      }
 
       panel.webview.postMessage({
         type: 'importResult',
@@ -521,219 +526,6 @@ export class SettingsWebviewProvider {
     }
   }
 
-  private async _forceResetCloudSync(panel: vscode.WebviewPanel) {
-    try {
-      // 检查是否正在编辑代码片段
-      if (ContextManager.isEditingSnippet()) {
-        panel.webview.postMessage({
-          type: 'forceResetResult',
-          success: false,
-          message: '用户正在编辑代码片段，请完成编辑后再进行重置',
-        })
-        return
-      }
-
-      // 显示严重警告
-      const warningMessage = `⚠️ 危险操作警告 ⚠️
-
-此操作将：
-• 清空云端所有同步文件
-• 清空本地历史记录
-• 重新初始化云端同步
-
-这是一个不可逆的操作！
-请确保您了解此操作的后果。
-
-是否继续？`
-
-      const choice = await vscode.window.showWarningMessage(
-        warningMessage,
-        { modal: true },
-        '我了解风险，继续执行',
-        '取消'
-      )
-
-      if (choice !== '我了解风险，继续执行') {
-        panel.webview.postMessage({
-          type: 'forceResetResult',
-          success: false,
-          message: '用户取消了重置操作',
-        })
-        return
-      }
-
-      // 二次确认
-      const finalConfirm = await vscode.window.showWarningMessage(
-        '🚨 最后确认：此操作将完全重置云端同步，无法撤销！',
-        { modal: true },
-        '确认执行',
-        '取消'
-      )
-
-      if (finalConfirm !== '确认执行') {
-        panel.webview.postMessage({
-          type: 'forceResetResult',
-          success: false,
-          message: '用户取消了重置操作',
-        })
-        return
-      }
-
-      // 发送开始重置消息
-      panel.webview.postMessage({
-        type: 'forceResetStarted',
-        message: '正在执行强制重置...',
-      })
-
-      // 获取扩展上下文和存储管理器
-      const context = SettingsManager.getExtensionContext()
-      if (!context) {
-        throw new Error('扩展上下文未初始化')
-      }
-
-      // 创建存储管理器实例
-      const storageManager = new StorageManager(context)
-      const cloudSyncManager = new CloudSyncManager(context, storageManager)
-
-      if (!cloudSyncManager.isConfigured()) {
-        throw new Error('云端同步未配置，请先完成配置')
-      }
-
-      // 获取当前代码片段和目录
-      const [snippets, directories] = await Promise.all([
-        storageManager.getAllSnippets(),
-        storageManager.getAllDirectories(),
-      ])
-
-      // 执行强制重置
-      const result = await cloudSyncManager.forceResetCloudSync(snippets, directories)
-
-      // 发送结果消息
-      panel.webview.postMessage({
-        type: 'forceResetResult',
-        success: result.success,
-        message: result.message,
-      })
-
-      if (result.success) {
-        vscode.window.showInformationMessage(`✅ ${result.message}`)
-
-        // 刷新树视图以显示重置后的状态
-        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
-
-        // 重新发送配置和状态到webview
-        await this._sendConfigToWebview(panel)
-      } else {
-        vscode.window.showErrorMessage(`❌ ${result.message}`)
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '强制重置失败'
-
-      panel.webview.postMessage({
-        type: 'forceResetResult',
-        success: false,
-        message: errorMessage,
-      })
-
-      vscode.window.showErrorMessage(`❌ 强制重置失败: ${errorMessage}`)
-    }
-  }
-
-  private async _abandonLocalAndImport(panel: vscode.WebviewPanel) {
-    try {
-      // 检查是否正在编辑代码片段
-      if (ContextManager.isEditingSnippet()) {
-        panel.webview.postMessage({
-          type: 'abandonLocalResult',
-          success: false,
-          message: '用户正在编辑代码片段，请完成编辑后再进行操作',
-        })
-        return
-      }
-
-      // 显示警告
-      const warningMessage = `⚠️ 重要操作确认 ⚠️
-
-此操作将：
-• 删除本地所有代码片段和目录
-• 清空本地历史记录
-• 从云端重新导入所有数据
-
-本地的所有未同步更改将丢失！
-请确保您了解此操作的后果。
-
-是否继续？`
-
-      const choice = await vscode.window.showWarningMessage(
-        warningMessage,
-        { modal: true },
-        '我了解风险，继续执行',
-        '取消'
-      )
-
-      if (choice !== '我了解风险，继续执行') {
-        panel.webview.postMessage({
-          type: 'abandonLocalResult',
-          success: false,
-          message: '用户取消了操作',
-        })
-        return
-      }
-
-      // 发送开始操作消息
-      panel.webview.postMessage({
-        type: 'abandonLocalStarted',
-        message: '正在从云端导入数据...',
-      })
-
-      // 获取扩展上下文和存储管理器
-      const context = SettingsManager.getExtensionContext()
-      if (!context) {
-        throw new Error('扩展上下文未初始化')
-      }
-
-      // 创建存储管理器实例
-      const storageManager = new StorageManager(context)
-      const cloudSyncManager = new CloudSyncManager(context, storageManager)
-
-      if (!cloudSyncManager.isConfigured()) {
-        throw new Error('云端同步未配置，请先完成配置')
-      }
-
-      // 执行放弃本地并从云端导入
-      const result = await cloudSyncManager.abandonLocalAndImportFromCloud()
-
-      // 发送结果消息
-      panel.webview.postMessage({
-        type: 'abandonLocalResult',
-        success: result.success,
-        message: result.message,
-      })
-
-      if (result.success) {
-        vscode.window.showInformationMessage(`✅ ${result.message}`)
-
-        // 刷新树视图以显示导入的代码片段
-        await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
-
-        // 重新发送配置和状态到webview
-        await this._sendConfigToWebview(panel)
-      } else {
-        vscode.window.showWarningMessage(`⚠️ ${result.message}`)
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '从云端导入失败'
-
-      panel.webview.postMessage({
-        type: 'abandonLocalResult',
-        success: false,
-        message: errorMessage,
-      })
-
-      vscode.window.showErrorMessage(`❌ 从云端导入失败: ${errorMessage}`)
-    }
-  }
-
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
     return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -749,7 +541,7 @@ export class SettingsWebviewProvider {
             background-color: var(--vscode-editor-background);
             padding: 30px;
             margin: 0;
-            min-height: 100vh;
+            line-height: 1.6;
         }
 
         .container {
@@ -759,36 +551,36 @@ export class SettingsWebviewProvider {
 
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
             padding-bottom: 20px;
-            border-bottom: 2px solid var(--vscode-panel-border);
+            border-bottom: 1px solid var(--vscode-widget-border);
         }
 
         .header h1 {
-            margin: 0;
-            color: var(--vscode-textLink-foreground);
+            margin: 0 0 10px 0;
             font-size: 24px;
+            font-weight: 600;
         }
 
         .header p {
-            margin: 10px 0 0 0;
+            margin: 0;
             color: var(--vscode-descriptionForeground);
-            font-size: 14px;
         }
 
         .section {
             margin-bottom: 30px;
             padding: 20px;
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 6px;
-            background-color: var(--vscode-panel-background);
+            border: 1px solid var(--vscode-widget-border);
+            border-radius: 8px;
+            background-color: var(--vscode-sideBar-background);
         }
 
         .section-title {
             font-size: 16px;
-            font-weight: bold;
+            font-weight: 600;
             margin-bottom: 15px;
-            color: var(--vscode-textLink-foreground);
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--vscode-widget-border);
         }
 
         .form-group {
@@ -818,10 +610,6 @@ export class SettingsWebviewProvider {
         .form-group select:focus {
             outline: none;
             border-color: var(--vscode-focusBorder);
-        }
-
-        .form-group input[type="password"] {
-            font-family: monospace;
         }
 
         .form-group input[type="number"] {
@@ -938,13 +726,25 @@ export class SettingsWebviewProvider {
         .hidden {
             display: none;
         }
+
+        .migration-notice {
+            background-color: var(--vscode-notificationsWarningIcon-foreground);
+            color: var(--vscode-editor-background);
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .migration-notice h3 {
+            margin: 0 0 10px 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>☁️ 云端同步设置(🧪实验性功能)</h1>
-            <p>配置 S3 兼容存储服务，实现代码片段的云端同步</p>
+            <h1>🔄 云端同步设置</h1>
+            <p>基于 Git 的代码片段云端同步配置</p>
         </div>
         
         <div id="statusMessage" class="status hidden"></div>
@@ -954,54 +754,70 @@ export class SettingsWebviewProvider {
             <div class="section-title">连接状态</div>
             <div class="connection-status">
                 <div id="statusIndicator" class="status-indicator disconnected"></div>
-                <span id="statusText">未连接</span>
+                <span id="statusText">功能开发中</span>
             </div>
-            <div id="lastSyncTime" class="help-text"></div>
-            <div id="lastError" class="help-text" style="color: var(--vscode-errorForeground);"></div>
+            <div id="lastSyncTime" class="help-text">Git 同步功能即将推出</div>
+            <div id="lastError" class="help-text" style="color: var(--vscode-errorForeground); display: none;"></div>
         </div>
 
-        <!-- S3 配置 -->
+        <!-- Git 配置 -->
         <div class="section">
-            <div class="section-title">S3 兼容存储配置</div>
+            <div class="section-title">Git 同步配置</div>
             
             <div class="form-group">
-                <label for="endpoint">Endpoint *</label>
-                <input type="text" id="endpoint" placeholder="例如: https://s3.amazonaws.com">
-                <div class="help-text">S3 兼容服务的端点地址</div>
-            </div>
-
-            <div class="form-group">
-                <label for="accessKey">Access Key *</label>
-                <input type="text" id="accessKey" placeholder="访问密钥">
-            </div>
-
-            <div class="form-group">
-                <label for="secretKey">Secret Key *</label>
-                <input type="password" id="secretKey" placeholder="密钥">
-            </div>
-
-            <div class="form-group">
-                <label for="bucket">Bucket *</label>
-                <input type="text" id="bucket" placeholder="存储桶名称">
-            </div>
-
-            <div class="form-group">
-                <label for="region">Region ID *</label>
-                <input type="text" id="region" placeholder="例如: us-east-1">
-            </div>
-
-            <div class="form-group">
-                <label for="addressing">Addressing Style</label>
-                <select id="addressing">
-                    <option value="virtual-hosted-style">Virtual-hosted-style</option>
-                    <option value="path-style">Path-style</option>
+                <label for="provider">Git 平台 *</label>
+                <select id="provider">
+                    <option value="">请选择平台</option>
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                    <option value="gitee">Gitee</option>
                 </select>
-                <div class="help-text">URL 寻址方式</div>
+                <div class="help-text">选择您使用的 Git 平台</div>
             </div>
 
             <div class="form-group">
-                <label for="timeout">连接超时时间 (秒)</label>
-                <input type="number" id="timeout" min="1" max="300" value="30">
+                <label for="repositoryUrl">仓库 URL *</label>
+                <input type="text" id="repositoryUrl" placeholder="https://github.com/user/repo.git">
+                <div class="help-text">您的代码片段仓库地址</div>
+            </div>
+
+            <div class="form-group">
+                <label for="localPath">本地仓库路径 *</label>
+                <input type="text" id="localPath" placeholder="例如: C:\\Users\\用户名\\Documents\\snippets">
+                <div class="help-text">本地Git仓库的存储路径</div>
+            </div>
+
+            <div class="form-group">
+                <label for="defaultBranch">默认分支</label>
+                <input type="text" id="defaultBranch" placeholder="main" value="main">
+                <div class="help-text">用于同步的分支名称</div>
+            </div>
+
+            <div class="form-group">
+                <label for="authenticationMethod">认证方式</label>
+                <select id="authenticationMethod">
+                    <option value="token">访问令牌</option>
+                    <option value="ssh">SSH密钥</option>
+                </select>
+                <div class="help-text">选择Git认证方式</div>
+            </div>
+
+            <div class="form-group" id="tokenGroup">
+                <label for="token">访问令牌 *</label>
+                <input type="password" id="token" placeholder="访问令牌">
+                <div class="help-text">用于访问私有仓库的令牌</div>
+            </div>
+
+            <div class="form-group" id="sshGroup" style="display: none;">
+                <label for="sshKeyPath">SSH密钥路径</label>
+                <input type="text" id="sshKeyPath" placeholder="例如: ~/.ssh/id_rsa">
+                <div class="help-text">SSH私钥文件的路径</div>
+            </div>
+
+            <div class="form-group">
+                <label for="commitMessageTemplate">提交信息模板</label>
+                <input type="text" id="commitMessageTemplate" placeholder="Sync snippets: {timestamp}" value="Sync snippets: {timestamp}">
+                <div class="help-text">提交时使用的信息模板，{timestamp} 会被替换为时间戳</div>
             </div>
         </div>
 
@@ -1017,15 +833,9 @@ export class SettingsWebviewProvider {
             </div>
 
             <div class="form-group">
-                <label for="syncInterval">自动同步间隔 (秒)</label>
-                <input type="number" id="syncInterval" min="10" max="3600" value="60">
-                <div class="help-text">自动同步的时间间隔（10-3600秒）</div>
-            </div>
-
-            <div class="form-group">
-                <label for="concurrency">请求并发数</label>
-                <input type="number" id="concurrency" min="1" max="10" value="3">
-                <div class="help-text">同时进行的上传/下载请求数量</div>
+                <label for="syncInterval">自动同步间隔 (分钟)</label>
+                <input type="number" id="syncInterval" min="5" max="60" value="15">
+                <div class="help-text">自动同步的时间间隔（5-60分钟）</div>
             </div>
         </div>
 
@@ -1037,52 +847,12 @@ export class SettingsWebviewProvider {
             <button id="resetBtn" class="btn btn-danger">重置配置</button>
         </div>
 
-        <!-- 危险操作区域 -->
-        <div class="section">
-            <div class="section-title" style="color: var(--vscode-errorForeground);">🚨 危险操作</div>
-            
-            <div style="margin-bottom: 20px;">
-                <p class="help-text">
-                    <strong style="color: var(--vscode-notificationsWarningIcon-foreground);">从云端导入：</strong>
-                    删除本地所有代码片段和目录，从云端重新导入所有数据。
-                    <br><br>
-                    <strong>使用场景：</strong>
-                    <br>• 本地数据损坏，需要从云端恢复
-                    <br>• 想要放弃本地更改，使用云端版本
-                    <br>• 在新设备上首次同步
-                    <br><br>
-                    <span style="color: var(--vscode-notificationsWarningIcon-foreground);">⚠️ 本地所有未同步的更改将丢失！</span>
-                </p>
-                <div class="button-group">
-                    <button id="abandonLocalBtn" class="btn btn-danger">📥 放弃本地，从云端导入</button>
-                </div>
-            </div>
-
-            <div>
-                <p class="help-text">
-                    <strong style="color: var(--vscode-errorForeground);">强制重置云端同步：</strong>
-                    清空云端所有同步文件和本地历史记录，然后重新初始化云端同步。
-                    <br><br>
-                    <span style="color: var(--vscode-errorForeground);">⚠️ 这是一个不可逆的操作！只有在遇到严重同步问题时才使用此功能。</span>
-                    <br><br>
-                    <strong>使用场景：</strong>
-                    <br>• 多设备同步出现严重冲突
-                    <br>• 历史记录损坏导致无法同步
-                    <br>• 需要完全重新开始同步
-                </p>
-                <div class="button-group">
-                    <button id="forceResetBtn" class="btn btn-danger">🚨 强制重置云端同步</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 导入导出按钮 -->
+        <!-- 配置管理 -->
         <div class="section">
             <div class="section-title">配置管理</div>
             <p class="help-text">
-                <strong>导出设置：</strong>备份完整的同步配置（包含访问密钥），便于在其他设备上快速配置。<br>
-                <strong>导入设置：</strong>从备份文件恢复配置，支持完整导入或仅导入非敏感设置。<br>
-                <span style="color: var(--vscode-errorForeground);">⚠️ 导出的文件包含敏感信息，请妥善保管！</span>
+                <strong>导出设置：</strong>备份当前的同步配置。<br>
+                <strong>导入设置：</strong>从备份文件恢复配置。
             </p>
             <div class="button-group">
                 <button id="exportBtn" class="btn btn-secondary">📤 导出设置</button>
@@ -1101,16 +871,20 @@ export class SettingsWebviewProvider {
         const lastSyncTime = document.getElementById('lastSyncTime');
         const lastError = document.getElementById('lastError');
         
-        const endpointInput = document.getElementById('endpoint');
-        const accessKeyInput = document.getElementById('accessKey');
-        const secretKeyInput = document.getElementById('secretKey');
-        const bucketInput = document.getElementById('bucket');
-        const regionInput = document.getElementById('region');
-        const addressingSelect = document.getElementById('addressing');
-        const timeoutInput = document.getElementById('timeout');
+        // Git配置相关元素
+        const providerSelect = document.getElementById('provider');
+        const repositoryUrlInput = document.getElementById('repositoryUrl');
+        const localPathInput = document.getElementById('localPath');
+        const defaultBranchInput = document.getElementById('defaultBranch');
+        const authenticationMethodSelect = document.getElementById('authenticationMethod');
+        const tokenInput = document.getElementById('token');
+        const sshKeyPathInput = document.getElementById('sshKeyPath');
+        const commitMessageTemplateInput = document.getElementById('commitMessageTemplate');
         const autoSyncCheckbox = document.getElementById('autoSync');
         const syncIntervalInput = document.getElementById('syncInterval');
-        const concurrencyInput = document.getElementById('concurrency');
+        
+        const tokenGroup = document.getElementById('tokenGroup');
+        const sshGroup = document.getElementById('sshGroup');
         
         const saveBtn = document.getElementById('saveBtn');
         const testBtn = document.getElementById('testBtn');
@@ -1118,8 +892,18 @@ export class SettingsWebviewProvider {
         const resetBtn = document.getElementById('resetBtn');
         const exportBtn = document.getElementById('exportBtn');
         const importBtn = document.getElementById('importBtn');
-        const forceResetBtn = document.getElementById('forceResetBtn');
-        const abandonLocalBtn = document.getElementById('abandonLocalBtn');
+
+        // 认证方式切换
+        authenticationMethodSelect.addEventListener('change', () => {
+            const authMethod = authenticationMethodSelect.value;
+            if (authMethod === 'token') {
+                tokenGroup.style.display = 'block';
+                sshGroup.style.display = 'none';
+            } else if (authMethod === 'ssh') {
+                tokenGroup.style.display = 'none';
+                sshGroup.style.display = 'block';
+            }
+        });
 
         // 显示状态消息
         function showStatus(message, type = 'info') {
@@ -1160,31 +944,34 @@ export class SettingsWebviewProvider {
         // 获取表单数据
         function getFormData() {
             return {
-                endpoint: endpointInput.value.trim(),
-                accessKey: accessKeyInput.value.trim(),
-                secretKey: secretKeyInput.value.trim(),
-                bucket: bucketInput.value.trim(),
-                region: regionInput.value.trim(),
-                timeout: parseInt(timeoutInput.value) || 30,
-                addressing: addressingSelect.value,
+                provider: providerSelect.value,
+                repositoryUrl: repositoryUrlInput.value.trim(),
+                localPath: localPathInput.value.trim(),
+                defaultBranch: defaultBranchInput.value.trim() || 'main',
+                authenticationMethod: authenticationMethodSelect.value,
+                token: tokenInput.value.trim(),
+                sshKeyPath: sshKeyPathInput.value.trim(),
+                commitMessageTemplate: commitMessageTemplateInput.value.trim() || 'Sync snippets: {timestamp}',
                 autoSync: autoSyncCheckbox.checked,
-                syncInterval: parseInt(syncIntervalInput.value) || 60,
-                concurrency: parseInt(concurrencyInput.value) || 3
+                syncInterval: parseInt(syncIntervalInput.value) || 15
             };
         }
 
         // 设置表单数据
         function setFormData(config) {
-            endpointInput.value = config.endpoint || '';
-            accessKeyInput.value = config.accessKey || '';
-            secretKeyInput.value = config.secretKey || '';
-            bucketInput.value = config.bucket || '';
-            regionInput.value = config.region || '';
-            timeoutInput.value = config.timeout || 30;
-            addressingSelect.value = config.addressing || 'virtual-hosted-style';
+            providerSelect.value = config.provider || '';
+            repositoryUrlInput.value = config.repositoryUrl || '';
+            localPathInput.value = config.localPath || '';
+            defaultBranchInput.value = config.defaultBranch || 'main';
+            authenticationMethodSelect.value = config.authenticationMethod || 'token';
+            tokenInput.value = config.token || '';
+            sshKeyPathInput.value = config.sshKeyPath || '';
+            commitMessageTemplateInput.value = config.commitMessageTemplate || 'Sync snippets: {timestamp}';
             autoSyncCheckbox.checked = config.autoSync || false;
-            syncIntervalInput.value = config.syncInterval || 60;
-            concurrencyInput.value = config.concurrency || 3;
+            syncIntervalInput.value = config.syncInterval || 15;
+            
+            // 触发认证方式切换
+            authenticationMethodSelect.dispatchEvent(new Event('change'));
         }
 
         // 事件监听器
@@ -1207,8 +994,6 @@ export class SettingsWebviewProvider {
             });
         });
 
-
-
         manualSyncBtn.addEventListener('click', () => {
             manualSyncBtn.disabled = true;
             manualSyncBtn.textContent = '同步中...';
@@ -1219,133 +1004,83 @@ export class SettingsWebviewProvider {
         });
 
         resetBtn.addEventListener('click', () => {
+            if (confirm('确定要重置所有Git配置吗？此操作不可撤销。')) {
                 vscode.postMessage({
                     type: 'resetConfig'
                 });
+            }
         });
 
         exportBtn.addEventListener('click', () => {
-            exportBtn.disabled = true;
-            exportBtn.textContent = '📤 导出中...';
-            
             vscode.postMessage({
                 type: 'exportSettings'
             });
         });
 
         importBtn.addEventListener('click', () => {
-            importBtn.disabled = true;
-            importBtn.textContent = '📥 导入中...';
-            
             vscode.postMessage({
                 type: 'importSettings'
             });
         });
 
-        forceResetBtn.addEventListener('click', () => {
-            forceResetBtn.disabled = true;
-            forceResetBtn.textContent = '🚨 重置中...';
-            
-            vscode.postMessage({
-                type: 'forceResetCloudSync'
-            });
-        });
-
-        abandonLocalBtn.addEventListener('click', () => {
-            abandonLocalBtn.disabled = true;
-            abandonLocalBtn.textContent = '📥 导入中...';
-            
-            vscode.postMessage({
-                type: 'abandonLocalAndImport'
-            });
-        });
-
-        // 处理来自扩展的消息
+        // 监听来自扩展的消息
         window.addEventListener('message', event => {
             const message = event.data;
             
             switch (message.type) {
-                case 'configData':
+                case 'config':
                     setFormData(message.config);
                     updateConnectionStatus(message.status);
                     break;
-                    
+                case 'statusUpdate':
+                    updateConnectionStatus(message.status);
+                    break;
                 case 'saveSuccess':
                     showStatus(message.message, 'success');
                     break;
-                    
                 case 'saveError':
                     showStatus(message.message, 'error');
                     break;
-                    
                 case 'validationError':
                     showStatus(\`配置验证失败: \${message.errors.join(', ')}\`, 'error');
                     break;
-                    
                 case 'testingConnection':
                     showStatus(message.message, 'info');
                     break;
-                    
                 case 'testResult':
                     testBtn.disabled = false;
                     testBtn.textContent = '测试连接';
                     showStatus(message.message, message.success ? 'success' : 'error');
                     break;
-                    
                 case 'manualSyncResult':
                     manualSyncBtn.disabled = false;
                     manualSyncBtn.textContent = '手动同步';
                     showStatus(message.message, message.success ? 'success' : 'error');
                     break;
-                    
                 case 'syncStarted':
                     showStatus(message.message, 'info');
                     break;
-                    
-                case 'exportResult':
-                    exportBtn.disabled = false;
-                    exportBtn.textContent = '📤 导出设置';
-                    showStatus(message.message, message.success ? 'success' : 'error');
-                    break;
-                    
-                case 'importResult':
-                    importBtn.disabled = false;
-                    importBtn.textContent = '📥 导入设置';
-                    showStatus(message.message, message.success ? 'success' : 'error');
-                    break;
-                    
-                case 'statusUpdate':
-                    // 只更新状态显示，不重新加载表单数据
-                    updateConnectionStatus(message.status);
-                    break;
-                    
                 case 'resetSuccess':
                     showStatus(message.message, 'success');
                     break;
-
-                case 'forceResetStarted':
-                    showStatus(message.message, 'warning');
+                case 'exportSuccess':
+                    showStatus(message.message, 'success');
                     break;
-
-                case 'forceResetResult':
-                    forceResetBtn.disabled = false;
-                    forceResetBtn.textContent = '🚨 强制重置云端同步';
-                    showStatus(message.message, message.success ? 'success' : 'error');
+                case 'exportError':
+                    showStatus(message.message, 'error');
                     break;
-
-                case 'abandonLocalStarted':
-                    showStatus(message.message, 'warning');
+                case 'importSuccess':
+                    showStatus(message.message, 'success');
                     break;
-
-                case 'abandonLocalResult':
-                    abandonLocalBtn.disabled = false;
-                    abandonLocalBtn.textContent = '📥 放弃本地，从云端导入';
-                    showStatus(message.message, message.success ? 'success' : 'error');
+                case 'importError':
+                    showStatus(message.message, 'error');
                     break;
+                default:
+                    console.log('Unknown message type:', message.type);
             }
         });
 
-        // 页面加载时获取配置
+        // 请求加载配置
         vscode.postMessage({
             type: 'getConfig'
         });
