@@ -1,7 +1,7 @@
 ---
-description:
-globs:
-alwaysApply: false
+description: 
+globs: 
+alwaysApply: true
 ---
 # 开发和调试指南
 
@@ -130,3 +130,4 @@ try {
 3. 运行完整测试
 4. 执行 `npm run build` 生成发布包
 5. 使用 `vsce package` 创建 .vsix 文件
+
