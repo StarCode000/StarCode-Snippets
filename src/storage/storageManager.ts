@@ -169,7 +169,7 @@ export class StorageManager {
     try {
       const now = Date.now()
       if (this.snippetsCache && now - this.lastSnippetsRead < this.cacheLifetime) {
-        console.log(`StorageManager: 使用缓存返回 ${this.snippetsCache.length} 个代码片段`)
+        // console.log(`StorageManager: 使用缓存返回 ${this.snippetsCache.length} 个代码片段`)
         return this.snippetsCache
       }
 
@@ -178,16 +178,16 @@ export class StorageManager {
       this.snippetsCache = snippets
       this.lastSnippetsRead = now
 
-      console.log(`StorageManager: 从文件读取 ${snippets.length} 个代码片段`)
+      // console.log(`StorageManager: 从文件读取 ${snippets.length} 个代码片段`)
       if (snippets.length > 0) {
-        console.log(
-          '代码片段列表:',
-          JSON.stringify(
-            snippets.map((s: CodeSnippet) => ({ id: s.id, name: s.name, parentId: s.parentId })),
-            null,
-            2
-          )
-        )
+        // console.log(
+        //   '代码片段列表:',
+        //   JSON.stringify(
+        //     snippets.map((s: CodeSnippet) => ({ id: s.id, name: s.name, parentId: s.parentId })),
+        //     null,
+        //     2
+        //   )
+        // )
       }
 
       return snippets
@@ -223,7 +223,7 @@ export class StorageManager {
       const snippets = await this.getAllSnippets()
       snippets.push(snippet)
       await this.writeFileWithRetry(this.snippetsFile, snippets)
-      console.log(`代码片段已保存: ${snippet.name}`)
+      // console.log(`代码片段已保存: ${snippet.name}`)
     } catch (error) {
       console.error('保存代码片段失败:', error)
       throw error
@@ -243,13 +243,13 @@ export class StorageManager {
       const existing = snippets[index]
 
       if (!this.hasSnippetChanged(existing, snippet)) {
-        console.log(`代码片段无变化，跳过更新: ${snippet.name}`)
+        // console.log(`代码片段无变化，跳过更新: ${snippet.name}`)
         return
       }
 
       snippets[index] = snippet
       await this.writeFileWithRetry(this.snippetsFile, snippets)
-      console.log(`代码片段已更新: ${snippet.name}`)
+      // console.log(`代码片段已更新: ${snippet.name}`)
     } catch (error) {
       console.error('更新代码片段失败:', error)
       throw error
@@ -269,7 +269,7 @@ export class StorageManager {
       const deletedSnippet = snippets[index]
       snippets.splice(index, 1)
       await this.writeFileWithRetry(this.snippetsFile, snippets)
-      console.log(`代码片段已删除: ${deletedSnippet.name}`)
+      // console.log(`代码片段已删除: ${deletedSnippet.name}`)
     } catch (error) {
       console.error('删除代码片段失败:', error)
       throw error
@@ -282,7 +282,7 @@ export class StorageManager {
       const directories = await this.getAllDirectories()
       directories.push(directory)
       await this.writeFileWithRetry(this.directoriesFile, directories)
-      console.log(`目录已创建: ${directory.name}`)
+      // console.log(`目录已创建: ${directory.name}`)
     } catch (error) {
       console.error('创建目录失败:', error)
       throw error
@@ -302,13 +302,13 @@ export class StorageManager {
       const existing = directories[index]
 
       if (!this.hasDirectoryChanged(existing, directory)) {
-        console.log(`目录无变化，跳过更新: ${directory.name}`)
+        // console.log(`目录无变化，跳过更新: ${directory.name}`)
         return
       }
 
       directories[index] = directory
       await this.writeFileWithRetry(this.directoriesFile, directories)
-      console.log(`目录已更新: ${directory.name}`)
+      // console.log(`目录已更新: ${directory.name}`)
     } catch (error) {
       console.error('更新目录失败:', error)
       throw error
@@ -354,7 +354,7 @@ export class StorageManager {
         this.writeFileWithRetry(this.snippetsFile, snippets),
       ])
 
-      console.log(`目录及其内容已删除: ${deletedDirectory.name}`)
+      // console.log(`目录及其内容已删除: ${deletedDirectory.name}`)
     } catch (error) {
       console.error('删除目录失败:', error)
       throw error

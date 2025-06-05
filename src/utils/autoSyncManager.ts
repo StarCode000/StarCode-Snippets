@@ -7,6 +7,7 @@ import { ContextManager } from './contextManager'
 export class AutoSyncManager {
   private syncTimer: any = null
   private isRunning = false
+  private isSyncing = false // 防止并发同步的标志
   private cloudSyncManager: CloudSyncManager
   private storageManager: StorageManager
   private context: vscode.ExtensionContext
@@ -30,8 +31,15 @@ export class AutoSyncManager {
    */
   public start(): void {
     if (this.isRunning) {
-      console.log('自动同步已在运行中')
+      console.log('自动同步已在运行中，跳过重复启动')
       return
+    }
+
+    // 强制清理任何残留的定时器
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer)
+      this.syncTimer = null
+      console.log('清理了残留的同步定时器')
     }
 
     const config = SettingsManager.getCloudSyncConfig()
@@ -46,15 +54,20 @@ export class AutoSyncManager {
       return
     }
 
-    const intervalMs = (config.syncInterval || 60) * 1000 // 转换为毫秒
+    // config.syncInterval是分钟数，需要转换为秒数
+    const syncIntervalMinutes = config.syncInterval || 5 // 默认5分钟
+    // 确保间隔时间合理（最少0.5分钟，最大24小时）
+    const clampedMinutes = Math.max(0.5, Math.min(1440, syncIntervalMinutes))
+    const syncIntervalSeconds = clampedMinutes * 60
+    const intervalMs = syncIntervalSeconds * 1000 // 转换为毫秒
 
-    console.log(`启动自动同步，间隔: ${config.syncInterval}秒`)
+    console.log(`启动自动同步，配置间隔: ${syncIntervalMinutes}分钟，实际使用间隔: ${clampedMinutes}分钟 (${syncIntervalSeconds}秒)`)
 
     this.isRunning = true
     this.scheduleNextSync(intervalMs)
 
     // 显示状态栏提示
-    const statusBarItem = vscode.window.setStatusBarMessage(`🔄 自动同步已启动 (${config.syncInterval}秒间隔)`)
+    const statusBarItem = vscode.window.setStatusBarMessage(`🔄 自动同步已启动 (${clampedMinutes}分钟间隔)`)
     setTimeout(() => statusBarItem.dispose(), 3000)
   }
 
@@ -136,10 +149,10 @@ export class AutoSyncManager {
   private async performAutoSync(): Promise<void> {
     console.log('执行自动同步...')
 
-    // 检查是否正在编辑代码片段
-    if (ContextManager.isEditingSnippet()) {
-      console.log('用户正在编辑代码片段，跳过此次自动同步')
-      return // 跳过此次同步，但不停止定时器
+    // 防止并发同步
+    if (this.isSyncing) {
+      console.log('同步正在进行中，跳过此次自动同步')
+      return
     }
 
     // 检查配置是否仍然有效
@@ -161,6 +174,10 @@ export class AutoSyncManager {
       return
     }
 
+    // 设置同步标志
+    this.isSyncing = true
+    const syncStartTime = Date.now()
+
     try {
       // 获取当前数据
       const [snippets, directories] = await Promise.all([
@@ -172,7 +189,8 @@ export class AutoSyncManager {
       const result = await this.cloudSyncManager.performSync(snippets, directories)
 
       if (result.success) {
-        console.log('自动同步成功:', result.message)
+        const syncDuration = Date.now() - syncStartTime
+        console.log(`自动同步成功 (耗时 ${syncDuration}ms):`, result.message)
 
         // 更新同步状态
         const status = SettingsManager.getCloudSyncStatus()
@@ -213,6 +231,11 @@ export class AutoSyncManager {
       await SettingsManager.saveCloudSyncStatus(status)
 
       throw error // 重新抛出，让上层处理
+    } finally {
+      // 无论成功还是失败，都要清除同步标志
+      this.isSyncing = false
+      const totalDuration = Date.now() - syncStartTime
+      console.log(`自动同步操作完成，总耗时: ${totalDuration}ms`)
     }
   }
 
@@ -241,19 +264,68 @@ export class AutoSyncManager {
   }
 
   /**
+   * 获取详细的调试状态信息
+   */
+  public getDetailedStatus(): string {
+    const config = SettingsManager.getCloudSyncConfig()
+    const status = SettingsManager.getCloudSyncStatus()
+    
+    return `自动同步详细状态:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 配置信息:
+   • 自动同步启用: ${config.autoSync ? '✅ 是' : '❌ 否'}
+   • 配置的同步间隔: ${config.syncInterval || 'undefined'}分钟
+   • 云端同步已配置: ${this.cloudSyncManager.isConfigured() ? '✅ 是' : '❌ 否'}
+   • 当前Git平台: ${config.provider || '未设置'}
+
+🏃 运行状态:
+   • 自动同步正在运行: ${this.isRunning ? '✅ 是' : '❌ 否'}
+   • 当前正在同步: ${this.isSyncing ? '⚠️ 是' : '❌ 否'}
+   • 定时器已设置: ${this.syncTimer ? '✅ 是' : '❌ 否'}
+
+📊 历史状态:
+   • 上次同步时间: ${status.lastSyncTime ? new Date(status.lastSyncTime).toLocaleString() : '从未同步'}
+   • 连接状态: ${status.isConnected ? '✅ 已连接' : '❌ 断开连接'}
+   • 是否正在同步: ${status.isSyncing ? '⚠️ 是' : '❌ 否'}
+   • 最后错误: ${status.lastError || '无'}
+
+⏰ 时间信息:
+   • 当前时间: ${new Date().toLocaleString()}
+   • 下次同步时间: ${this.getStatus().nextSyncTime?.toLocaleString() || '未安排'}
+
+🐛 调试信息:
+   • Timer ID: ${this.syncTimer || 'null'}
+   • 实例哈希: ${this.constructor.name}@${Math.abs(this.hashCode())}`
+  }
+
+  private hashCode(): number {
+    let hash = 0
+    const str = this.toString()
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32bit integer
+    }
+    return hash
+  }
+
+  /**
    * 立即执行一次同步（不影响定时器）
    */
   public async syncNow(): Promise<{ success: boolean; message: string }> {
     console.log('立即执行同步...')
 
-    // 检查是否正在编辑代码片段
-    if (ContextManager.isEditingSnippet()) {
-      console.log('用户正在编辑代码片段，无法执行同步')
+    // 防止并发同步
+    if (this.isSyncing) {
       return {
         success: false,
-        message: '用户正在编辑代码片段，请完成编辑后再同步',
+        message: '同步正在进行中，请稍后再试'
       }
     }
+
+    // 设置同步标志
+    this.isSyncing = true
+    const syncStartTime = Date.now()
 
     try {
       const [snippets, directories] = await Promise.all([
@@ -264,6 +336,9 @@ export class AutoSyncManager {
       const result = await this.cloudSyncManager.performSync(snippets, directories)
 
       if (result.success) {
+        const syncDuration = Date.now() - syncStartTime
+        console.log(`立即同步成功 (耗时 ${syncDuration}ms):`, result.message)
+
         // 更新同步状态
         const status = SettingsManager.getCloudSyncStatus()
         status.lastSyncTime = Date.now()
@@ -292,6 +367,11 @@ export class AutoSyncManager {
         success: false,
         message: errorMessage,
       }
+    } finally {
+      // 无论成功还是失败，都要清除同步标志
+      this.isSyncing = false
+      const totalDuration = Date.now() - syncStartTime
+      console.log(`立即同步操作完成，总耗时: ${totalDuration}ms`)
     }
   }
 

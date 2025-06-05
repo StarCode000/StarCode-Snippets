@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.3.1",
+  "version": "0.4.0",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -195,6 +195,24 @@
         "title": "查看同步状态详情",
         "category": "StarCode Snippets",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "starcode-snippets.openDataViewer",
+        "title": "查看数据库版本",
+        "category": "StarCode Snippets",
+        "icon": "$(database)"
+      },
+      {
+        "command": "starcode-snippets.forceResetAutoSync",
+        "title": "强制重置自动同步",
+        "category": "StarCode Snippets",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "starcode-snippets.reinitializeRepository",
+        "title": "重新初始化Git仓库",
+        "category": "StarCode Snippets",
+        "icon": "$(repo-forked)"
       }
     ],
     "menus": {
@@ -242,6 +260,11 @@
           "command": "starcode-snippets.exportAll",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
+        },
+        {
+          "command": "starcode-snippets.openDataViewer",
+          "when": "view == starCodeSnippetsExplorer",
+          "group": "navigation@7"
         }
       ],
       "view/item/context": [
@@ -352,81 +375,7 @@
     "configuration": {
       "title": "StarCode Snippets",
       "properties": {
-        "starcode-snippets.cloudSync": {
-          "type": "object",
-          "default": {
-            "provider": "",
-            "repositoryUrl": "",
-            "token": "",
-            "localPath": "",
-            "defaultBranch": "main",
-            "authenticationMethod": "token",
-            "sshKeyPath": "",
-            "autoSync": false,
-            "syncInterval": 15,
-            "commitMessageTemplate": "Sync snippets: {timestamp}"
-          },
-          "description": "Git 云端同步配置",
-          "properties": {
-            "provider": {
-              "type": "string",
-              "enum": [
-                "",
-                "github",
-                "gitlab",
-                "gitee"
-              ],
-              "description": "Git 平台提供商"
-            },
-            "repositoryUrl": {
-              "type": "string",
-              "description": "Git 仓库 URL"
-            },
-            "token": {
-              "type": "string",
-              "description": "访问令牌"
-            },
-            "localPath": {
-              "type": "string",
-              "description": "本地 Git 仓库路径"
-            },
-            "defaultBranch": {
-              "type": "string",
-              "description": "默认分支名",
-              "default": "main"
-            },
-            "authenticationMethod": {
-              "type": "string",
-              "enum": [
-                "token",
-                "ssh"
-              ],
-              "description": "认证方式",
-              "default": "token"
-            },
-            "sshKeyPath": {
-              "type": "string",
-              "description": "SSH 密钥路径"
-            },
-            "autoSync": {
-              "type": "boolean",
-              "description": "是否启用自动同步",
-              "default": false
-            },
-            "syncInterval": {
-              "type": "number",
-              "description": "自动同步间隔（分钟）",
-              "minimum": 5,
-              "maximum": 1440,
-              "default": 15
-            },
-            "commitMessageTemplate": {
-              "type": "string",
-              "description": "提交信息模板",
-              "default": "Sync snippets: {timestamp}"
-            }
-          }
-        },
+
         "starcode-snippets.cloudSyncStatus": {
           "type": "object",
           "default": {
@@ -458,6 +407,84 @@
             "isSyncing": {
               "type": "boolean",
               "description": "是否正在同步"
+            }
+          }
+        },
+        "starcode-snippets.multiPlatformCloudSync": {
+          "type": "object",
+          "default": {
+            "platforms": [],
+            "autoSync": false,
+            "syncInterval": 15,
+            "activeConfigId": null
+          },
+          "description": "多平台云端同步配置",
+          "properties": {
+            "platforms": {
+              "type": "array",
+              "description": "多平台配置列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "配置ID"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "配置名称"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": ["github", "gitlab", "gitee"],
+                    "description": "Git 平台提供商"
+                  },
+                  "repositoryUrl": {
+                    "type": "string",
+                    "description": "Git 仓库 URL"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "访问令牌"
+                  },
+                  "localPath": {
+                    "type": "string",
+                    "description": "本地 Git 仓库路径"
+                  },
+                  "defaultBranch": {
+                    "type": "string",
+                    "description": "默认分支名"
+                  },
+                  "authenticationMethod": {
+                    "type": "string",
+                    "description": "认证方式"
+                  },
+                  "sshKeyPath": {
+                    "type": "string",
+                    "description": "SSH 密钥路径"
+                  },
+                  "commitMessageTemplate": {
+                    "type": "string",
+                    "description": "提交信息模板"
+                  },
+                  "isActive": {
+                    "type": "boolean",
+                    "description": "是否为当前激活的配置"
+                  }
+                }
+              }
+            },
+            "autoSync": {
+              "type": "boolean",
+              "description": "是否启用自动同步"
+            },
+            "syncInterval": {
+              "type": "number",
+              "description": "自动同步间隔（分钟）"
+            },
+            "activeConfigId": {
+              "type": ["string", "null"],
+              "description": "当前激活的配置ID"
             }
           }
         },

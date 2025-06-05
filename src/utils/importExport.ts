@@ -261,11 +261,11 @@ export class ImportExportManager {
       if (isV2 && !isV2Data) {
         // 将V1数据转换为V2
         importData = PathBasedManager.convertExportDataV1ToV2(importData as ExportDataV1)
-        console.log('已将导入数据从V1转换为V2格式')
+        // console.log('已将导入数据从V1转换为V2格式')
       } else if (!isV2 && isV2Data) {
         // 将V2数据转换为V1
         importData = PathBasedManager.convertExportDataV2ToV1(importData as ExportDataV2)
-        console.log('已将导入数据从V2转换为V1格式')
+        // console.log('已将导入数据从V2转换为V1格式')
       }
 
       // 执行导入
