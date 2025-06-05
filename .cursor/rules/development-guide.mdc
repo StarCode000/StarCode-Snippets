@@ -124,10 +124,6 @@ try {
 4. **向后兼容**: 新功能不破坏现有数据
 5. **文档更新**: 新功能需要更新相关文档
 
-## 发布流程
-1. 更新版本号在 [package.json](mdc:package.json)
-2. 更新 [CHANGELOG.md](mdc:CHANGELOG.md)
-3. 运行完整测试
-4. 执行 `npm run build` 生成发布包
-5. 使用 `vsce package` 创建 .vsix 文件
-
+### 注意事项
+1. 不允许在未经用户同意的情况下修改 [README.md](mdc:README.md)和 [CHANGELOG.md](mdc:CHANGELOG.md)。这两个文件是发布插件新版本前才能修改的。用户会亲自修改这两个文件。
+2. 只有在用户允许的情况下才能将当前任务的总结写入新的文档中。

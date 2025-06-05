@@ -1,18 +1,116 @@
+# 开发文件
 .vscode/**
 .vscode-test/**
 out/**
 node_modules/**
 src/**
+scripts/**
+.cursor/**
+
+# 配置文件
 .gitignore
 .yarnrc
 webpack.config.js
 vsc-extension-quickstart.md
 **/tsconfig.json
 **/eslint.config.mjs
-**/*.map
+build-extension.js
+
+# 源码文件
 **/*.ts
 **/.vscode-test.*
-!assets/**
-!media/**
+
+# 文档文件（除了README和CHANGELOG）
 *.md
+!README.md
+!CHANGELOG.md
+
+# 构建产物
 *.vsix
+**/*.map
+
+# 临时文件
+temp-monaco/**
+
+# 媒体文件 - 只保留必要的
+!media/**
+!dist/**
+
+# Monaco Editor 优化 - 排除不必要的文件
+media/monaco-editor/**/*.md
+media/monaco-editor/**/*.txt
+media/monaco-editor/**/test/**
+media/monaco-editor/**/tests/**
+media/monaco-editor/**/docs/**
+media/monaco-editor/**/samples/**
+media/monaco-editor/**/demo/**
+media/monaco-editor/node_modules/**
+media/monaco-editor/package-lock.json
+media/monaco-editor/.git/**
+
+# Monaco Editor - 排除不常用的语言包
+media/monaco-editor/min/vs/basic-languages/abap/**
+media/monaco-editor/min/vs/basic-languages/apex/**
+media/monaco-editor/min/vs/basic-languages/azcli/**
+media/monaco-editor/min/vs/basic-languages/bat/**
+media/monaco-editor/min/vs/basic-languages/bicep/**
+media/monaco-editor/min/vs/basic-languages/cameligo/**
+media/monaco-editor/min/vs/basic-languages/clojure/**
+media/monaco-editor/min/vs/basic-languages/coffee/**
+media/monaco-editor/min/vs/basic-languages/csp/**
+media/monaco-editor/min/vs/basic-languages/cypher/**
+media/monaco-editor/min/vs/basic-languages/dart/**
+media/monaco-editor/min/vs/basic-languages/ecl/**
+media/monaco-editor/min/vs/basic-languages/elixir/**
+media/monaco-editor/min/vs/basic-languages/flow9/**
+media/monaco-editor/min/vs/basic-languages/freemarker2/**
+media/monaco-editor/min/vs/basic-languages/fsharp/**
+media/monaco-editor/min/vs/basic-languages/graphql/**
+media/monaco-editor/min/vs/basic-languages/handlebars/**
+media/monaco-editor/min/vs/basic-languages/hcl/**
+media/monaco-editor/min/vs/basic-languages/ini/**
+media/monaco-editor/min/vs/basic-languages/julia/**
+media/monaco-editor/min/vs/basic-languages/lexon/**
+media/monaco-editor/min/vs/basic-languages/liquid/**
+media/monaco-editor/min/vs/basic-languages/m3/**
+media/monaco-editor/min/vs/basic-languages/mdx/**
+media/monaco-editor/min/vs/basic-languages/mips/**
+media/monaco-editor/min/vs/basic-languages/msdax/**
+media/monaco-editor/min/vs/basic-languages/objective-c/**
+media/monaco-editor/min/vs/basic-languages/pascal/**
+media/monaco-editor/min/vs/basic-languages/pascaligo/**
+media/monaco-editor/min/vs/basic-languages/pla/**
+media/monaco-editor/min/vs/basic-languages/postiats/**
+media/monaco-editor/min/vs/basic-languages/powerquery/**
+media/monaco-editor/min/vs/basic-languages/powershell/**
+media/monaco-editor/min/vs/basic-languages/protobuf/**
+media/monaco-editor/min/vs/basic-languages/pug/**
+media/monaco-editor/min/vs/basic-languages/qsharp/**
+media/monaco-editor/min/vs/basic-languages/razor/**
+media/monaco-editor/min/vs/basic-languages/redis/**
+media/monaco-editor/min/vs/basic-languages/redshift/**
+media/monaco-editor/min/vs/basic-languages/restructuredtext/**
+media/monaco-editor/min/vs/basic-languages/sb/**
+media/monaco-editor/min/vs/basic-languages/scheme/**
+media/monaco-editor/min/vs/basic-languages/solidity/**
+media/monaco-editor/min/vs/basic-languages/sophia/**
+media/monaco-editor/min/vs/basic-languages/sparql/**
+media/monaco-editor/min/vs/basic-languages/st/**
+media/monaco-editor/min/vs/basic-languages/systemverilog/**
+media/monaco-editor/min/vs/basic-languages/tcl/**
+media/monaco-editor/min/vs/basic-languages/twig/**
+media/monaco-editor/min/vs/basic-languages/typespec/**
+media/monaco-editor/min/vs/basic-languages/vb/**
+media/monaco-editor/min/vs/basic-languages/wgsl/**
+
+# 排除dist目录中可能的多余文件
+dist/**/*.worker.js
+dist/**/*.worker.js.map
+dist/**/*.worker.js.LICENSE.txt
+
+# 排除开发和测试相关文件
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+**/*.tmp
+**/*.temp

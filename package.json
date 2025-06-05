@@ -220,6 +220,36 @@
         "title": "重新初始化Git仓库",
         "category": "StarCode Snippets",
         "icon": "$(repo-forked)"
+      },
+      {
+        "command": "starcode-snippets.pullFromCloud",
+        "title": "从云端拉取数据",
+        "category": "StarCode Snippets",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "starcode-snippets.forcePushToCloud",
+        "title": "强制推送到云端",
+        "category": "StarCode Snippets",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "starcode-snippets.forceImportFromGitRepo",
+        "title": "从Git仓库强制导入",
+        "category": "StarCode Snippets",
+        "icon": "$(repo-sync)"
+      },
+      {
+        "command": "starcode-snippets.testEditorDetection",
+        "title": "测试编辑器检测",
+        "category": "StarCode Snippets - Debug",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "starcode-snippets.testEditorSpecificPaths",
+        "title": "测试编辑器特定路径",
+        "category": "StarCode Snippets - Debug",
+        "icon": "$(folder)"
       }
     ],
     "menus": {
@@ -508,17 +538,24 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "npm run build",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool source-map",
-    "build": "node build-extension.js",
-    "build:quick": "npm run package && vsce package",
+    "build": "node scripts/build-extension.js",
+    "build:full": "node scripts/build-and-package.js",
+    "build:quick": "npm run package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --fix",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "download-monaco": "node scripts/download-monaco.js",
+    "setup": "npm run download-monaco",
+    "pre-publish": "node scripts/pre-publish.js",
+    "publish": "npm run pre-publish && vsce publish",
+    "package-ext": "npm run pre-publish && vsce package",
+    "check-monaco": "node scripts/check-monaco.js"
   },
   "devDependencies": {
     "@types/diff": "^5.2.3",
@@ -529,11 +566,7 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
-    "copy-webpack-plugin": "^12.0.2",
-    "css-loader": "^7.1.2",
     "eslint": "^9.19.0",
-    "monaco-editor-webpack-plugin": "^7.1.0",
-    "style-loader": "^4.0.0",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
@@ -542,7 +575,6 @@
   },
   "dependencies": {
     "diff": "^5.1.0",
-    "monaco-editor": "^0.52.2",
     "node-diff3": "^3.1.2",
     "simple-git": "^3.27.0",
     "uuid": "^11.1.0"

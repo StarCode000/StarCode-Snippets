@@ -271,26 +271,26 @@ export class SettingsWebviewProvider {
   
   // 测试Git平台配置连接
   private async _testPlatformConnection(config: GitPlatformConfig, panel: vscode.WebviewPanel) {
-    // console.log('开始平台配置连接测试...')
+    // console.log('开始连接测试...')
     try {
       panel.webview.postMessage({
-        type: 'testingConnection',
+        type: 'platformTestStarted',
         configId: config.id,
         message: '正在测试连接...',
       })
-      
-      // 转换为传统配置格式进行测试
+
+      // 转换为CloudSyncConfig格式
       const legacyConfig: CloudSyncConfig = {
         provider: config.provider,
         repositoryUrl: config.repositoryUrl,
         token: config.token,
-        localPath: config.localPath || PathUtils.getDefaultLocalRepoPath(),
+        localPath: config.localPath,
         defaultBranch: config.defaultBranch,
         authenticationMethod: config.authenticationMethod,
         sshKeyPath: config.sshKeyPath,
-        autoSync: false, // 这些不影响连接测试
-        syncInterval: 15,
-        commitMessageTemplate: config.commitMessageTemplate
+        commitMessageTemplate: config.commitMessageTemplate,
+        autoSync: false, // 测试时不需要
+        syncInterval: 15, // 默认值
       }
 
       // 使用CloudSyncManager进行真实连接测试
@@ -300,7 +300,11 @@ export class SettingsWebviewProvider {
         throw new Error('扩展上下文未初始化')
       }
 
-      const cloudSyncManager = new CloudSyncManager(context)
+      // 为连接测试创建StorageManager实例
+      const { StorageManager } = await import('../storage/storageManager')
+      const storageManager = new StorageManager(context)
+
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
       cloudSyncManager.updateConfig(legacyConfig) // 使用转换后的配置
 
       // console.log('调用testConnection方法...')
@@ -405,7 +409,11 @@ export class SettingsWebviewProvider {
         throw new Error('扩展上下文未初始化')
       }
 
-      const cloudSyncManager = new CloudSyncManager(context)
+      // 为连接测试创建StorageManager实例
+      const { StorageManager } = await import('../storage/storageManager')
+      const storageManager = new StorageManager(context)
+
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
       cloudSyncManager.updateConfig(config) // 使用最新配置
 
       // console.log('调用testConnection方法...')
@@ -528,23 +536,32 @@ export class SettingsWebviewProvider {
       // 获取同步状态
     const status = SettingsManager.getCloudSyncStatus()
 
-      // 获取本地路径描述
+      // 获取本地路径描述 - 使用编辑器特定路径
       const localPathDescription = SettingsManager.getLocalPathDescription()
       const isUsingDefaultPath = SettingsManager.isUsingDefaultPath()
-      const defaultLocalPath = PathUtils.getDefaultLocalRepoPath()
+      const defaultLocalPath = PathUtils.getEditorSpecificRepoPath(undefined, SettingsManager.getExtensionContext() || undefined)
       
-      // 获取所有平台的实际解析路径
+      // 获取所有平台的实际解析路径 - 使用编辑器特定路径
       const platformPaths: { [provider: string]: string } = {}
+      const extensionContext = SettingsManager.getExtensionContext() || undefined
       if (multiConfig.platforms) {
         multiConfig.platforms.forEach(platform => {
-          const resolvedPath = PathUtils.resolveDefaultPathToken(platform.localPath || '', platform.provider)
+          const resolvedPath = PathUtils.resolveDefaultPathToken(
+            platform.localPath || '', 
+            platform.provider, 
+            extensionContext
+          )
           platformPaths[platform.provider] = resolvedPath
         })
       }
       
       // 如果有激活平台，也添加其路径
       if (activePlatform) {
-        const resolvedPath = PathUtils.resolveDefaultPathToken(activePlatform.localPath || '', activePlatform.provider)
+        const resolvedPath = PathUtils.resolveDefaultPathToken(
+          activePlatform.localPath || '', 
+          activePlatform.provider, 
+          extensionContext
+        )
         platformPaths[activePlatform.provider] = resolvedPath
       }
       
@@ -600,13 +617,15 @@ export class SettingsWebviewProvider {
       // 使用StorageContext来获取正确版本的数据
       const { StorageStrategyFactory } = await import('../utils/storageStrategy')
       const { StorageContext } = await import('../utils/storageContext')
+      const { StorageManager } = await import('../storage/storageManager')
       
       const storageStrategy = StorageStrategyFactory.createStrategy(context)
       const storageContext = new StorageContext(storageStrategy)
+      const storageManager = new StorageManager(context)
       
       // console.log(`手动同步使用存储版本: ${storageContext.getVersion()}`)
       
-      const cloudSyncManager = new CloudSyncManager(context, null) // 传递null，CloudSyncManager不直接使用storageManager
+      const cloudSyncManager = new CloudSyncManager(context, storageManager) // 传递storageManager以支持智能合并
 
       const [snippets, directories] = await Promise.all([
         storageContext.getAllSnippets(),
@@ -1126,6 +1145,46 @@ export class SettingsWebviewProvider {
       console.error('导入设置失败:', error)
       const errorMessage = error instanceof Error ? error.message : '导入设置失败'
 
+      // 如果是配置注册问题，尝试自动修复
+      if (errorMessage.includes('没有注册配置') || errorMessage.includes('starcode-snippets.multiPlatformCloudSync')) {
+        try {
+          console.log('检测到配置注册问题，正在尝试自动修复...')
+          
+          // 记录错误状态，用于后续自动检查
+          const context = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(''))?.name || 'global'
+          try {
+            const extensionContext = require('../utils/settingsManager').SettingsManager.getExtensionContext()
+            if (extensionContext) {
+              await extensionContext.globalState.update('lastConfigError', errorMessage)
+            }
+          } catch (stateError) {
+            console.warn('记录错误状态失败:', stateError)
+          }
+          
+          // 等待配置系统初始化
+          await this._waitForConfigurationAvailable()
+          
+          // 提示用户重试
+          const retryResult = await vscode.window.showWarningMessage(
+            '检测到插件配置系统正在初始化中。这是插件更新后的正常现象，请稍后重试导入操作。\n\n' +
+            '💡 提示：插件将在初始化完成后自动提醒您重试。',
+            '立即重试',
+            '稍后处理'
+          )
+          
+          if (retryResult === '立即重试') {
+            // 递归重试导入操作
+            setTimeout(() => {
+              this._importSettings(panel)
+            }, 1000)
+            return
+          }
+          
+        } catch (fixError) {
+          console.warn('自动修复配置注册问题失败:', fixError)
+        }
+      }
+
       panel.webview.postMessage({
         type: 'importResult',
         success: false,
@@ -1134,6 +1193,33 @@ export class SettingsWebviewProvider {
 
       vscode.window.showErrorMessage(`导入设置失败: ${errorMessage}`)
     }
+  }
+
+  /**
+   * 等待配置在VSCode中注册完成
+   */
+  private async _waitForConfigurationAvailable(maxWaitTime: number = 3000): Promise<void> {
+    const startTime = Date.now()
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const config = vscode.workspace.getConfiguration()
+        const configSchema = config.inspect('starcode-snippets.multiPlatformCloudSync')
+        
+        if (configSchema && configSchema.defaultValue !== undefined) {
+          // 配置已可用
+          return
+        }
+        
+        // 等待100ms后重试
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        // 忽略检查错误，继续等待
+      }
+    }
+    
+    // 超时后记录警告
+    console.warn(`配置注册等待超时 (${maxWaitTime}ms)`)
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
@@ -1517,18 +1603,16 @@ export class SettingsWebviewProvider {
             </div>
 
             <div class="form-group">
-                <label for="localPath">本地仓库路径 (可选)</label>
-                <input type="text" id="localPath" placeholder="留空表示使用默认路径">
-                <div class="help-text" id="localPathHelp">
-                    <div>💡 智能路径管理：</div>
-                    <div>• 勾选"使用平台默认路径标识符"可确保配置在不同系统间同步时自动适配</div>
-                    <div>• 手动输入路径时，如检测到跨平台不兼容会自动调整为标识符</div>
-                    <div>• 支持的标识符：GITHUB_DEFAULT_REPO、GITLAB_DEFAULT_REPO、GITEE_DEFAULT_REPO</div>
-                    <div id="defaultPathInfo" class="default-path-info"></div>
+                <label>本地仓库路径</label>
+                <div class="platform-info">
+                    <span id="currentRepoPath">自动管理</span>
                 </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="useDefaultPath">
-                    <label for="useDefaultPath">使用默认路径</label>
+                <div class="help-text" id="localPathHelp">
+                    <div>🔄 编辑器特定路径：</div>
+                    <div>• 系统自动为不同编辑器（VSCode/Cursor）创建独立的存储目录</div>
+                    <div>• 确保不同编辑器间的数据完全隔离，避免冲突</div>
+                    <div>• 不同Git平台（GitHub/GitLab/Gitee）使用独立的子目录</div>
+                    <div id="defaultPathInfo" class="default-path-info"></div>
                 </div>
             </div>
 
@@ -1663,9 +1747,8 @@ export class SettingsWebviewProvider {
         // Git配置相关元素
         const providerSelect = document.getElementById('provider');
         const repositoryUrlInput = document.getElementById('repositoryUrl');
-        const localPathInput = document.getElementById('localPath');
+        const currentRepoPath = document.getElementById('currentRepoPath');
         const defaultPathInfo = document.getElementById('defaultPathInfo');
-        const useDefaultPathCheckbox = document.getElementById('useDefaultPath');
         const defaultBranchInput = document.getElementById('defaultBranch');
         const authenticationMethodSelect = document.getElementById('authenticationMethod');
         const tokenInput = document.getElementById('token');
@@ -1710,77 +1793,34 @@ export class SettingsWebviewProvider {
                 .replace(/'/g, '&#039;');
         }
 
-        // 初始化默认路径信息
-        function updateDefaultPathInfo(defaultPath, description) {
-            if (defaultPathInfo) {
-                defaultPathInfo.textContent = description || \`默认路径: \${defaultPath}\`;
-            }
-        }
-
-        // 使用默认路径复选框切换
-        useDefaultPathCheckbox.addEventListener('change', () => {
-            updateLocalPathDisplay();
-        });
-
-        // 更新本地路径显示状态
-        function updateLocalPathDisplay() {
+        // 更新路径显示信息
+        function updatePathDisplay() {
             const provider = providerSelect.value;
             
-            if (useDefaultPathCheckbox.checked) {
-                // 勾选使用默认路径：显示实际路径（只读），但数据存储为标识符
-                // 优先使用后端解析的实际路径，如果没有则使用前端模拟的路径
-                const actualPath = platformPaths[provider] || getPlatformDefaultPath(provider);
-                
-                localPathInput.value = actualPath;
-                localPathInput.placeholder = '使用平台默认路径（只读）';
-                localPathInput.disabled = true;
-                localPathInput.style.fontStyle = 'italic';
-                localPathInput.style.color = 'var(--vscode-descriptionForeground)';
-                
-                // 只有在没有已存在的 data-token 时才设置新的
-                // 这样可以避免覆盖从 setFormData 设置的正确标识符
-                if (!localPathInput.getAttribute('data-token')) {
-                    const defaultPathToken = getDefaultPathTokenForProvider(provider);
-                    localPathInput.setAttribute('data-token', defaultPathToken);
-                }
-            } else {
-                // 未勾选：可编辑状态
-                localPathInput.disabled = false;
-                localPathInput.placeholder = '留空或输入自定义路径';
-                localPathInput.style.fontStyle = 'normal';
-                localPathInput.style.color = 'var(--vscode-input-foreground)';
-                localPathInput.removeAttribute('data-token');
-                
-                // 如果当前值是后端解析的实际路径，清空输入框
-                const actualPath = platformPaths[provider] || getPlatformDefaultPath(provider);
-                if (localPathInput.value === actualPath) {
-                    localPathInput.value = '';
-                }
+            if (currentRepoPath && provider && platformPaths[provider]) {
+                // 显示当前平台的编辑器特定路径
+                currentRepoPath.textContent = platformPaths[provider];
+            } else if (currentRepoPath) {
+                // 显示编辑器信息
+                const editorType = detectEditorType();
+                currentRepoPath.textContent = \`\${editorType} 专用存储（选择平台后显示具体路径）\`;
             }
         }
 
-        // 获取平台对应的默认路径标识符
-        function getDefaultPathTokenForProvider(provider) {
-            switch (provider) {
-                case 'github':
-                    return 'GITHUB_DEFAULT_REPO';
-                case 'gitlab':
-                    return 'GITLAB_DEFAULT_REPO';
-                case 'gitee':
-                    return 'GITEE_DEFAULT_REPO';
-                default:
-                    return '';
+        // 检测编辑器类型
+        function detectEditorType() {
+            // 这是一个简化版本，与后端的检测逻辑保持一致
+            const userAgent = navigator.userAgent.toLowerCase();
+            if (userAgent.includes('cursor')) {
+                return 'Cursor';
+            } else {
+                return 'VSCode';
             }
         }
 
         // 平台选择变化
         providerSelect.addEventListener('change', () => {
-            // 如果当前勾选了使用默认路径，更新显示和data-token
-            if (useDefaultPathCheckbox.checked) {
-                // 清除旧的 data-token，让 updateLocalPathDisplay 设置新的
-                localPathInput.removeAttribute('data-token');
-                updateLocalPathDisplay();
-            }
+            updatePathDisplay();
         });
 
         // 认证方式切换
@@ -1878,19 +1918,10 @@ export class SettingsWebviewProvider {
 
         // 获取表单数据
         function getFormData() {
-            // 如果勾选了使用默认路径，保存默认路径标识符；否则保存用户输入的路径
-            let localPathValue;
-            if (useDefaultPathCheckbox.checked) {
-                // 从data-token属性获取标识符，如果没有则使用旧逻辑
-                localPathValue = localPathInput.getAttribute('data-token') || getDefaultPathTokenForProvider(providerSelect.value);
-            } else {
-                localPathValue = localPathInput.value.trim();
-            }
-            
             return {
                 provider: providerSelect.value,
                 repositoryUrl: repositoryUrlInput.value.trim(),
-                localPath: localPathValue,
+                localPath: '', // 现在总是使用编辑器特定的默认路径
                 defaultBranch: defaultBranchInput.value.trim() || 'main',
                 authenticationMethod: authenticationMethodSelect.value,
                 token: tokenInput.value.trim(),
@@ -1906,35 +1937,14 @@ export class SettingsWebviewProvider {
             providerSelect.value = config.provider || '';
             repositoryUrlInput.value = config.repositoryUrl || '';
             
-            // 处理本地路径逻辑
-            const localPath = config.localPath || '';
-            const isDefaultPathToken = localPath === 'GITHUB_DEFAULT_REPO' || 
-                                     localPath === 'GITLAB_DEFAULT_REPO' || 
-                                     localPath === 'GITEE_DEFAULT_REPO' || 
-                                     localPath === 'DEFAULT_REPO';
-            const isUsingDefault = !localPath || localPath.trim() === '' || isDefaultPathToken || config.isUsingDefaultPath;
+            // 更新路径显示（现在总是自动管理）
+            updatePathDisplay();
             
-            if (isUsingDefault) {
-                useDefaultPathCheckbox.checked = true;
-                if (isDefaultPathToken) {
-                    // 存储标识符到data属性
-                    localPathInput.setAttribute('data-token', localPath);
-                }
-                // 更新显示状态（会显示实际路径并设为只读）
-                updateLocalPathDisplay();
-            } else {
-                localPathInput.value = localPath;
-                useDefaultPathCheckbox.checked = false;
-                localPathInput.disabled = false;
-                localPathInput.placeholder = '留空或输入自定义路径';
-                localPathInput.style.fontStyle = 'normal';
-                localPathInput.style.color = 'var(--vscode-input-foreground)';
-                localPathInput.removeAttribute('data-token');
-            }
-            
-            // 更新默认路径信息显示
+            // 如果有路径描述信息，显示在帮助文本中
             if (config.defaultPathDescription) {
-                updateDefaultPathInfo(config.effectiveLocalPath, config.defaultPathDescription);
+                if (defaultPathInfo) {
+                    defaultPathInfo.textContent = config.defaultPathDescription;
+                }
             }
             
             defaultBranchInput.value = config.defaultBranch || 'main';
@@ -1957,11 +1967,6 @@ export class SettingsWebviewProvider {
                     const currentFormData = getFormData();
                     currentFormData.provider = currentPlatform;
                     
-                    // 修复路径标识符问题：如果使用默认路径，确保使用当前平台对应的标识符
-                    if (useDefaultPathCheckbox.checked) {
-                        currentFormData.localPath = getDefaultPathTokenForProvider(currentPlatform);
-                    }
-                    
                     platformConfigs[currentPlatform] = currentFormData;
                     // console.log('保存前先更新缓存:', getPlatformName(currentPlatform));
                 }
@@ -1978,10 +1983,6 @@ export class SettingsWebviewProvider {
                 
                 // 添加当前表单配置
                 if (currentConfig.provider && currentConfig.repositoryUrl?.trim()) {
-                    // 再次确保当前配置的路径标识符正确
-                    if (useDefaultPathCheckbox.checked) {
-                        currentConfig.localPath = getDefaultPathTokenForProvider(currentConfig.provider);
-                    }
                     allConfigs[currentConfig.provider] = currentConfig;
                     configCount++;
                     // console.log('准备保存当前配置:', getPlatformName(currentConfig.provider));
@@ -2082,11 +2083,6 @@ export class SettingsWebviewProvider {
                 // 确保保存的配置包含正确的provider
                 currentFormData.provider = currentPlatform;
                 
-                // 修复路径标识符问题：如果使用默认路径，确保使用当前平台对应的标识符
-                if (useDefaultPathCheckbox.checked) {
-                    currentFormData.localPath = getDefaultPathTokenForProvider(currentPlatform);
-                }
-                
                 platformConfigs[currentPlatform] = currentFormData;
                 // console.log('已保存', getPlatformName(currentPlatform), '配置到缓存');
             }
@@ -2136,37 +2132,7 @@ export class SettingsWebviewProvider {
             }
         }
 
-        // 获取平台特定的默认路径（后备方案，优先使用后端提供的真实路径）
-        function getPlatformDefaultPath(platform) {
-            // 如果后端已提供解析后的路径，优先使用
-            if (platformPaths[platform]) {
-                return platformPaths[platform];
-            }
-            
-            // 后备方案：前端模拟（显示未解析的路径格式）
-            const isWindows = navigator.platform.indexOf('Win') > -1;
-            const isMac = navigator.platform.indexOf('Mac') > -1;
-            
-            const platformName = getPlatformName(platform);
-            
-            if (isWindows) {
-                return \`%USERPROFILE%\\\\Documents\\\\StarCode-Snippets\\\\\${platformName}\`;
-            } else if (isMac) {
-                return \`~/Documents/StarCode-Snippets/\${platformName}\`;
-            } else {
-                // Linux
-                return \`~/.local/share/starcode-snippets/\${platform.toLowerCase()}\`;
-            }
-        }
 
-        // 更新平台特定的默认路径显示
-        function updatePlatformDefaultPathInfo(platform) {
-            if (defaultPathInfo && platform) {
-                const defaultPath = getPlatformDefaultPath(platform);
-                const platformName = getPlatformName(platform);
-                defaultPathInfo.textContent = \`\${platformName} 默认路径: \${defaultPath}\`;
-            }
-        }
 
         // 显示路径冲突警告
         function updatePathConflictsDisplay(pathConflicts) {
@@ -2307,8 +2273,8 @@ export class SettingsWebviewProvider {
                     updateActivePlatformDisplay();
                     renderPlatformList();
                     
-                    // 更新当前平台的默认路径显示
-                    updatePlatformDefaultPathInfo(currentPlatform);
+                    // 更新当前平台的路径显示
+                    updatePathDisplay();
                     
                     // 显示路径冲突警告
                     updatePathConflictsDisplay(message.pathConflicts);

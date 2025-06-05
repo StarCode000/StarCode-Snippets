@@ -1,9 +1,11 @@
 import * as os from 'os'
 import * as path from 'path'
+import * as vscode from 'vscode'
 
 /**
  * 跨平台路径工具类
  * 负责处理不同操作系统下的默认路径逻辑
+ * 基于VSCode globalStorageUri实现编辑器隔离
  */
 export class PathUtils {
   // 默认路径的特殊标识符
@@ -13,9 +15,88 @@ export class PathUtils {
     GITEE_DEFAULT_REPO: 'GITEE_DEFAULT_REPO',
     GENERIC_DEFAULT_REPO: 'DEFAULT_REPO'
   } as const
+
   /**
-   * 获取默认的本地仓库路径（通用版本，不建议直接使用）
-   * 根据不同操作系统返回合适的默认路径
+   * 基于VSCode globalStorageUri获取编辑器特定的仓库路径
+   * 这是推荐的主要方法，可确保不同编辑器间的数据隔离
+   */
+  static getEditorSpecificRepoPath(gitPlatform?: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): string {
+    // 优先使用传入的context，否则尝试从SettingsManager获取
+    let extensionContext = context
+    if (!extensionContext) {
+      try {
+        const { SettingsManager } = require('./settingsManager')
+        extensionContext = SettingsManager.getExtensionContext()
+      } catch (error) {
+        console.warn('无法获取扩展上下文，使用备用路径')
+      }
+    }
+
+    if (extensionContext) {
+      // 使用VSCode的globalStorageUri确保编辑器隔离
+      const baseStoragePath = extensionContext.globalStorageUri.fsPath
+      
+      if (gitPlatform) {
+        // 为特定Git平台创建子目录
+        const platformName = this.getPlatformDisplayName(gitPlatform)
+        return path.join(baseStoragePath, 'repos', platformName)
+      } else {
+        // 通用仓库目录
+        return path.join(baseStoragePath, 'repos', 'default')
+      }
+    }
+
+    // 备用方案：使用传统的默认路径
+    console.warn('无法获取VSCode存储路径，使用备用默认路径')
+    return gitPlatform ? 
+      this.getDefaultLocalRepoPathForPlatform(gitPlatform) : 
+      this.getDefaultLocalRepoPath()
+  }
+
+  /**
+   * 获取编辑器特定的路径描述
+   */
+  static getEditorSpecificPathDescription(gitPlatform?: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): string {
+    const editorPath = this.getEditorSpecificRepoPath(gitPlatform, context)
+    
+    // 检测编辑器类型
+    const editorType = this.detectEditorType(context)
+    const platformDesc = gitPlatform ? this.getPlatformDisplayName(gitPlatform) : '默认'
+    
+    return `${editorType} 专用存储 - ${platformDesc} 仓库: ${editorPath}`
+  }
+
+  /**
+   * 检测当前编辑器类型
+   */
+  static detectEditorType(context?: vscode.ExtensionContext): string {
+    let extensionContext = context
+    if (!extensionContext) {
+      try {
+        const { SettingsManager } = require('./settingsManager')
+        extensionContext = SettingsManager.getExtensionContext()
+      } catch (error) {
+        return '未知编辑器'
+      }
+    }
+
+    if (extensionContext) {
+      const globalStoragePath = extensionContext.globalStorageUri.fsPath.toLowerCase()
+      const appName = vscode.env.appName.toLowerCase()
+      
+      if (appName.includes('cursor') || globalStoragePath.includes('cursor')) {
+        return 'Cursor'
+      } else if (appName.includes('visual studio code') || appName.includes('vscode') || globalStoragePath.includes('code')) {
+        return 'VSCode'
+      }
+    }
+    
+    return vscode.env.appName || '未知编辑器'
+  }
+
+  /**
+   * 获取默认的本地仓库路径（通用版本，保持向后兼容）
+   * @deprecated 推荐使用 getEditorSpecificRepoPath() 替代
    */
   static getDefaultLocalRepoPath(): string {
     const platform = os.platform()
@@ -38,8 +119,8 @@ export class PathUtils {
   }
 
   /**
-   * 获取特定Git平台的默认本地仓库路径
-   * 为不同的Git平台提供独立的默认目录，避免冲突
+   * 获取特定Git平台的默认本地仓库路径（保持向后兼容）
+   * @deprecated 推荐使用 getEditorSpecificRepoPath(gitPlatform) 替代
    */
   static getDefaultLocalRepoPathForPlatform(gitPlatform: 'github' | 'gitlab' | 'gitee'): string {
     const platform = os.platform()
@@ -382,25 +463,24 @@ export class PathUtils {
 
   /**
    * 将默认路径标识符解析为实际路径
+   * 优先使用编辑器特定路径，确保编辑器间数据隔离
    */
-  static resolveDefaultPathToken(pathOrToken: string, gitPlatform?: 'github' | 'gitlab' | 'gitee'): string {
+  static resolveDefaultPathToken(pathOrToken: string, gitPlatform?: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): string {
     if (!pathOrToken || pathOrToken.trim() === '') {
-      // 空路径，使用平台特定默认路径或通用默认路径
-      return gitPlatform 
-        ? this.getDefaultLocalRepoPathForPlatform(gitPlatform)
-        : this.getDefaultLocalRepoPath()
+      // 空路径，使用编辑器特定的默认路径
+      return this.getEditorSpecificRepoPath(gitPlatform, context)
     }
 
     // 检查是否为默认路径标识符
     switch (pathOrToken) {
       case this.DEFAULT_PATH_TOKENS.GITHUB_DEFAULT_REPO:
-        return this.getDefaultLocalRepoPathForPlatform('github')
+        return this.getEditorSpecificRepoPath('github', context)
       case this.DEFAULT_PATH_TOKENS.GITLAB_DEFAULT_REPO:
-        return this.getDefaultLocalRepoPathForPlatform('gitlab')
+        return this.getEditorSpecificRepoPath('gitlab', context)
       case this.DEFAULT_PATH_TOKENS.GITEE_DEFAULT_REPO:
-        return this.getDefaultLocalRepoPathForPlatform('gitee')
+        return this.getEditorSpecificRepoPath('gitee', context)
       case this.DEFAULT_PATH_TOKENS.GENERIC_DEFAULT_REPO:
-        return this.getDefaultLocalRepoPath()
+        return this.getEditorSpecificRepoPath(undefined, context)
       default:
         // 不是默认路径标识符，直接返回原路径
         // 避免使用 normalizePath，因为其中的 path.resolve 会受当前工作目录影响

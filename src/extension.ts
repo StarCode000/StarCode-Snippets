@@ -30,15 +30,167 @@ import { registerDebugGiteeAuthCommand } from './commands/debugGiteeAuth'
 import { registerTestGiteeAuthMethodsCommand } from './commands/testGiteeAuthMethods'
 import { registerClearGitCredentialsCommand } from './commands/clearGitCredentials'
 import { registerReconfigureGitRemoteCommand } from './commands/reconfigureGitRemote'
+import { PathUtils } from './utils/pathUtils'
 
-export function activate(context: vscode.ExtensionContext): void {
+/**
+ * 确保配置已正确注册，修复插件更新后可能出现的配置注册问题
+ */
+function ensureConfigurationRegistered(): void {
+  try {
+    // 检查多平台配置是否已注册
+    const config = vscode.workspace.getConfiguration()
+    const multiPlatformConfigSchema = config.inspect('starcode-snippets.multiPlatformCloudSync')
+    
+    if (!multiPlatformConfigSchema || !multiPlatformConfigSchema.defaultValue) {
+      // 配置未正确注册，等待一段时间后重试
+      // console.log('检测到配置注册问题，等待配置系统初始化...')
+      setTimeout(() => {
+        const retryConfig = vscode.workspace.getConfiguration()
+        const retrySchema = retryConfig.inspect('starcode-snippets.multiPlatformCloudSync')
+        if (!retrySchema || !retrySchema.defaultValue) {
+          console.warn('配置系统初始化可能存在延迟，但将继续执行...')
+        } else {
+          // console.log('配置系统已完成初始化')
+        }
+      }, 100)
+    } else {
+      // console.log('配置注册检查通过')
+    }
+  } catch (error) {
+    console.warn('配置注册检查出现错误，但将继续执行:', error)
+  }
+}
+
+/**
+ * 等待配置注册完成的异步函数
+ */
+async function waitForConfigurationRegistered(maxWaitTime: number = 3000): Promise<void> {
+  const startTime = Date.now()
+  
+  while (Date.now() - startTime < maxWaitTime) {
+    try {
+      const config = vscode.workspace.getConfiguration()
+      const multiPlatformConfigSchema = config.inspect('starcode-snippets.multiPlatformCloudSync')
+      
+      if (multiPlatformConfigSchema && multiPlatformConfigSchema.defaultValue) {
+        // console.log('配置注册已完成')
+        return
+      }
+      
+      // 等待50ms后重试
+      await new Promise(resolve => setTimeout(resolve, 50))
+    } catch (error) {
+      // 忽略检查错误，继续等待
+    }
+  }
+  
+  // 超时后继续执行，但记录警告
+  console.warn(`配置注册等待超时 (${maxWaitTime}ms)，将继续执行`)
+}
+
+/**
+ * 启动时配置修复助手
+ * 在插件更新后自动处理配置注册延迟问题
+ */
+async function initializeConfigurationSystem(): Promise<void> {
+  try {
+    // 第一步：基础检查
+    ensureConfigurationRegistered()
+    
+    // 第二步：等待配置系统完全初始化
+    await waitForConfigurationRegistered(3000)
+    
+    // 第三步：验证配置可写性
+    try {
+      const testConfig = vscode.workspace.getConfiguration()
+      await testConfig.update('starcode-snippets.multiPlatformCloudSync', 
+        testConfig.get('starcode-snippets.multiPlatformCloudSync'), 
+        vscode.ConfigurationTarget.Global
+      )
+      // console.log('配置系统验证通过')
+    } catch (testError) {
+      console.warn('配置系统验证失败，但将继续执行:', testError)
+    }
+    
+  } catch (error) {
+    console.warn('配置系统初始化过程中发生错误，但将继续执行:', error)
+  }
+}
+
+/**
+ * 检查并通知用户配置问题
+ * 用于启动后检测常见的配置问题并给出解决建议
+ */
+async function checkAndNotifyConfigurationIssues(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    // 检查配置系统是否正常工作
+    const config = vscode.workspace.getConfiguration()
+    const configSchema = config.inspect('starcode-snippets.multiPlatformCloudSync')
+    
+    if (!configSchema || configSchema.defaultValue === undefined) {
+      // 配置系统仍有问题，显示用户友好的提示
+      const action = await vscode.window.showWarningMessage(
+        '⚠️ StarCode Snippets 插件配置系统正在初始化中\n\n' +
+        '这是插件更新后的正常现象。如果遇到"导入设置失败"等问题，请稍等片刻后重试。\n\n' +
+        '常见解决方案：\n' +
+        '• 重新加载窗口 (Ctrl+Shift+P → "重新加载窗口")\n' +
+        '• 重启 VSCode\n' +
+        '• 稍等1-2分钟后重试操作',
+        '重新加载窗口',
+        '我知道了'
+      )
+      
+      if (action === '重新加载窗口') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow')
+      }
+      return
+    }
+    
+    // 检查是否存在空的配置（可能表示导入失败）
+    const multiConfig = config.get('starcode-snippets.multiPlatformCloudSync') as any
+    if (multiConfig && multiConfig.platforms && multiConfig.platforms.length === 0) {
+      // 检查是否有表示需要导入的状态标记
+      const lastErrorCheck = context.globalState.get('lastConfigError', '')
+      if (lastErrorCheck.includes('没有注册配置') || lastErrorCheck.includes('multiPlatformCloudSync')) {
+        const action = await vscode.window.showInformationMessage(
+          '💡 检测到配置系统已准备就绪\n\n' +
+          '如果您之前尝试导入设置时遇到错误，现在可以重新尝试了。',
+          '打开设置页面',
+          '稍后处理'
+        )
+        
+        if (action === '打开设置页面') {
+          vscode.commands.executeCommand('starcode-snippets.openSettings')
+        }
+        
+        // 清除错误标记
+        await context.globalState.update('lastConfigError', undefined)
+      }
+    }
+    
+  } catch (error) {
+    // 静默处理检查错误，不影响用户体验
+    console.warn('配置问题检查失败:', error)
+  }
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.time('starcode-snippets:activate')
   // console.log('StarCode Snippets 扩展开始激活...')
 
   try {
+    // 首先初始化配置系统，处理插件更新后的配置注册问题
+    // console.log('初始化配置系统...')
+    await initializeConfigurationSystem()
+
     // 初始化设置管理器
     // console.log('初始化设置管理器...')
     SettingsManager.setExtensionContext(context)
+
+    // 检查是否是首次启动或配置导入可能失败的情况
+    setTimeout(() => {
+      checkAndNotifyConfigurationIssues(context)
+    }, 5000) // 5秒后检查，确保插件完全激活
 
     // 使用策略模式初始化存储
     const storageStrategy = StorageStrategyFactory.createStrategy(context)
@@ -170,8 +322,14 @@ export function activate(context: vscode.ExtensionContext): void {
     storageManager.deleteDirectory = (id: string) => storageContext.deleteDirectory(id)
     storageManager.clearCache = () => storageContext.clearCache()
     
+    // 添加V2格式支持的方法
+    ;(storageManager as any).getSnippetByPath = (path: string) => storageContext.getSnippetByPath(path)
+    ;(storageManager as any).getDirectoryByPath = (path: string) => storageContext.getDirectoryByPath(path)
+    ;(storageManager as any).getSnippetById = (id: string) => storageContext.getSnippetById(id)
+    ;(storageManager as any).getDirectoryById = (id: string) => storageContext.getDirectoryById(id)
+    
     // 添加获取上下文的方法，以便TreeDataProvider能检测存储格式
-    {(storageManager as any).getStorageContext = () => storageContext}
+    ;(storageManager as any).getStorageContext = () => storageContext
 
     // 创建标准组件
     const searchManager = new SearchManager()
@@ -684,7 +842,22 @@ function registerCommands(
         }
 
         // 3. 检查代码片段重名
-        const isDuplicate = await checkDuplicateSnippetName(newName, item.snippet.parentId)
+        let isDuplicate = false
+        
+        if (currentVersion === 'v2') {
+          // V2格式：基于路径检查重复
+          const pathParts = item.snippet.fullPath.split('/')
+          pathParts[pathParts.length - 1] = newName // 替换最后一部分为新名称
+          const newFullPath = pathParts.join('/')
+          
+          // 检查新路径是否已存在且不是当前代码片段
+          const existingSnippet = await storageContext.getSnippetByPath(newFullPath)
+          isDuplicate = existingSnippet !== null && existingSnippet.fullPath !== item.snippet.fullPath
+        } else {
+          // V1格式：使用原有逻辑
+          isDuplicate = await checkDuplicateSnippetName(newName, item.snippet.parentId)
+        }
+        
         if (isDuplicate) {
           vscode.window.showErrorMessage(`所选目录中已存在名为 "${newName}" 的代码片段`)
           return
@@ -726,7 +899,23 @@ function registerCommands(
         }
 
         // 3. 检查目录重名
-        const isDuplicate = await checkDuplicateDirectoryName(newName, item.directory.parentId)
+        let isDuplicate = false
+        
+        if (currentVersion === 'v2') {
+          // V2格式：基于路径检查重复
+          const oldPath = item.directory.fullPath
+          const pathParts = oldPath.split('/')
+          pathParts[pathParts.length - 2] = newName // 倒数第二个是目录名（最后一个是空字符串）
+          const newFullPath = pathParts.join('/')
+          
+          // 检查新路径是否已存在且不是当前目录
+          const existingDirectory = await storageContext.getDirectoryByPath(newFullPath)
+          isDuplicate = existingDirectory !== null && existingDirectory.fullPath !== item.directory.fullPath
+        } else {
+          // V1格式：使用原有逻辑
+          isDuplicate = await checkDuplicateDirectoryName(newName, item.directory.parentId)
+        }
+        
         if (isDuplicate) {
           vscode.window.showErrorMessage(`当前层级已存在名为 "${newName}" 的目录`)
           return
@@ -813,7 +1002,18 @@ function registerCommands(
       }
       
       // 3. 检查目录重名
-      const isDuplicate = await checkDuplicateDirectoryName(name, null)
+      let isDuplicate = false
+      
+      if (currentVersion === 'v2') {
+        // V2格式：基于路径检查重复
+        const targetPath = `/${name}/`
+        const existingDirectory = await storageContext.getDirectoryByPath(targetPath)
+        isDuplicate = existingDirectory !== null
+      } else {
+        // V1格式：使用原有逻辑
+        isDuplicate = await checkDuplicateDirectoryName(name, null)
+      }
+      
       if (isDuplicate) {
         vscode.window.showErrorMessage(`根目录下已存在名为 "${name}" 的目录`)
         return
@@ -876,7 +1076,21 @@ function registerCommands(
         }
         
         // 3. 检查代码片段重名
-        const isDuplicate = await checkDuplicateSnippetName(name, item.directory.id)
+        let isDuplicate = false
+        
+        if (storageVersion === 'v2') {
+          // V2格式：基于路径检查重复
+          const targetPath = item.directory.fullPath === '/' 
+            ? `/${name}` 
+            : `${item.directory.fullPath}${name}`
+          
+          const existingSnippet = await storageContext.getSnippetByPath(targetPath)
+          isDuplicate = existingSnippet !== null
+        } else {
+          // V1格式：使用原有逻辑
+          isDuplicate = await checkDuplicateSnippetName(name, item.directory.id)
+        }
+        
         if (isDuplicate) {
           vscode.window.showErrorMessage(`目录 "${item.directory.name}" 中已存在名为 "${name}" 的代码片段`)
           return
@@ -1012,7 +1226,18 @@ function registerCommands(
         }
         
         // 3. 检查代码片段重名（在根级别）
-        const isDuplicate = await checkDuplicateSnippetName(name, null)
+        let isDuplicate = false
+        
+        if (storageVersion === 'v2') {
+          // V2格式：基于路径检查重复
+          const targetPath = `/${name}`
+          const existingSnippet = await storageContext.getSnippetByPath(targetPath)
+          isDuplicate = existingSnippet !== null
+        } else {
+          // V1格式：使用原有逻辑
+          isDuplicate = await checkDuplicateSnippetName(name, null)
+        }
+        
         if (isDuplicate) {
           vscode.window.showErrorMessage(`根目录中已存在名为 "${name}" 的代码片段`)
           return
@@ -1344,6 +1569,10 @@ function registerCommands(
   const openSettings = vscode.commands.registerCommand('starcode-snippets.openSettings', async () => {
     // console.log('openSettings 命令被调用')
     try {
+      // 在打开设置前确保配置已注册
+      ensureConfigurationRegistered()
+      await waitForConfigurationRegistered(1000)
+      
       SettingsWebviewProvider.createOrShow(context.extensionUri)
     } catch (error) {
       console.error('openSettings 命令执行失败:', error)
@@ -1408,7 +1637,43 @@ function registerCommands(
           progress.report({ increment: 100, message: '同步完成' })
 
           if (result.success) {
+            // 检查是否有自动合并的数据需要导入到VSCode
+            if (result.message.includes('自动合并')) {
+              try {
+                // 读取Git仓库中的最新数据
+                const { snippets: latestSnippets, directories: latestDirectories } = await cloudSyncManager.readDataFromGitRepo()
+                
+                // 计算新增的数据（远程数据减去原本地数据）
+                const originalSnippetIds = new Set(snippets.map(s => s.id || (s as any).fullPath))
+                const originalDirIds = new Set(directories.map(d => d.id || (d as any).fullPath))
+                
+                const newSnippets = latestSnippets.filter(s => !originalSnippetIds.has(s.id || (s as any).fullPath))
+                const newDirectories = latestDirectories.filter(d => !originalDirIds.has(d.id || (d as any).fullPath))
+                
+                if (newSnippets.length > 0 || newDirectories.length > 0) {
+                  // 导入新数据到VSCode存储
+                  for (const directory of newDirectories) {
+                    await storageManager.createDirectory(directory)
+                  }
+                  
+                  for (const snippet of newSnippets) {
+                    await storageManager.saveSnippet(snippet)
+                  }
+                  
+                  // 显示包含导入信息的成功消息
+                  vscode.window.showInformationMessage(
+                    `✅ ${result.message}\n\n🎉 已自动导入 ${newSnippets.length} 个代码片段和 ${newDirectories.length} 个目录到VSCode`
+                  )
+                } else {
+                  vscode.window.showInformationMessage(`✅ ${result.message}`)
+                }
+              } catch (importError) {
+                console.warn('自动导入合并数据失败:', importError)
+                vscode.window.showInformationMessage(`✅ ${result.message}\n\n⚠️ 自动导入数据时出现问题，请手动刷新或使用"导入代码片段"功能`)
+              }
+            } else {
             vscode.window.showInformationMessage(`✅ 同步成功: ${result.message}`)
+            }
             refreshTreeView()
           } else {
             vscode.window.showErrorMessage(`❌ 同步失败: ${result.message}`)
@@ -1554,7 +1819,7 @@ function registerCommands(
       }, async (progress) => {
         progress.report({ increment: 0, message: '准备重新初始化...' })
 
-        const cloudSyncManager = new CloudSyncManager(context)
+        const cloudSyncManager = new CloudSyncManager(context, storageManager)
         
         progress.report({ increment: 30, message: '正在重新初始化仓库...' })
         const result = await cloudSyncManager.reinitializeRepository()
@@ -1575,6 +1840,210 @@ function registerCommands(
     } catch (error) {
       console.error('重新初始化仓库失败:', error)
       vscode.window.showErrorMessage(`❌ 重新初始化仓库失败: ${error instanceof Error ? error.message : '未知错误'}`)
+    }
+  })
+
+  // 注册从云端拉取数据命令
+  const pullFromCloud = vscode.commands.registerCommand('starcode-snippets.pullFromCloud', async () => {
+    try {
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
+      if (!cloudSyncManager.isConfigured()) {
+        const action = await vscode.window.showWarningMessage('云端同步未配置，是否打开设置？', '打开设置', '取消')
+        if (action === '打开设置') {
+          vscode.commands.executeCommand('starcode-snippets.openSettings')
+        }
+        return
+      }
+
+      // 使用进度条显示拉取过程
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: '从云端拉取数据',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0, message: '正在检查远程仓库...' })
+
+          const result = await cloudSyncManager.pullFromCloud()
+
+          progress.report({ increment: 100, message: '拉取完成' })
+
+          if (result.success) {
+            // 询问用户是否要导入拉取的数据
+            if (result.data && (result.data.snippets.length > 0 || result.data.directories.length > 0)) {
+              const importAction = await vscode.window.showInformationMessage(
+                `✅ ${result.message}\n\n是否要将拉取的数据导入到VSCode？`,
+                '导入数据',
+                '稍后手动导入',
+                '取消'
+              )
+              
+              if (importAction === '导入数据') {
+                                 try {
+                   // 导入数据到VSCode存储
+                   for (const directory of result.data.directories) {
+                     await storageManager.createDirectory(directory)
+                   }
+                   
+                   for (const snippet of result.data.snippets) {
+                     await storageManager.saveSnippet(snippet)
+                   }
+                  
+                  vscode.window.showInformationMessage(
+                    `🎉 数据导入成功！\n已导入 ${result.data.snippets.length} 个代码片段和 ${result.data.directories.length} 个目录。`
+                  )
+                  refreshTreeView()
+                } catch (importError) {
+                  vscode.window.showErrorMessage(
+                    `导入数据时出错: ${importError instanceof Error ? importError.message : '未知错误'}`
+                  )
+                }
+              } else if (importAction === '稍后手动导入') {
+                vscode.window.showInformationMessage(
+                  '数据已保存到本地Git仓库，您可以稍后使用"导入代码片段"功能手动导入。'
+                )
+              }
+            } else {
+              vscode.window.showInformationMessage(`✅ ${result.message}`)
+            }
+          } else {
+            vscode.window.showErrorMessage(`❌ 拉取失败: ${result.message}`)
+          }
+        }
+      )
+    } catch (error) {
+      console.error('从云端拉取数据失败:', error)
+      vscode.window.showErrorMessage(`❌ 从云端拉取数据失败: ${error instanceof Error ? error.message : '未知错误'}`)
+    }
+  })
+
+  // 注册强制推送到云端命令
+  const forcePushToCloud = vscode.commands.registerCommand('starcode-snippets.forcePushToCloud', async () => {
+    try {
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
+      if (!cloudSyncManager.isConfigured()) {
+        const action = await vscode.window.showWarningMessage('云端同步未配置，是否打开设置？', '打开设置', '取消')
+        if (action === '打开设置') {
+          vscode.commands.executeCommand('starcode-snippets.openSettings')
+        }
+        return
+      }
+
+      // 显示严重警告
+      const confirmAction = await vscode.window.showWarningMessage(
+        '⚠️ 危险操作警告！\n\n强制推送将会：\n• 完全覆盖远程仓库的所有数据\n• 删除远程仓库的提交历史\n• 此操作不可撤销！\n\n请确保您已经备份了重要数据。\n\n只有在确定远程数据已损坏或需要重置时才使用此功能。',
+        { modal: true },
+        '我确定要强制推送',
+        '取消'
+      )
+
+      if (confirmAction !== '我确定要强制推送') {
+        vscode.window.showInformationMessage('操作已取消')
+        return
+      }
+
+      // 二次确认
+      const finalConfirm = await vscode.window.showWarningMessage(
+        '🚨 最后确认\n\n这是您最后一次机会取消操作！\n\n强制推送将不可逆转地覆盖远程仓库数据。\n\n确定继续？',
+        { modal: true },
+        '确定执行强制推送',
+        '取消'
+      )
+
+      if (finalConfirm !== '确定执行强制推送') {
+        vscode.window.showInformationMessage('操作已取消')
+        return
+      }
+
+      // 使用进度条显示强制推送过程
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: '强制推送到云端',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0, message: '正在准备本地数据...' })
+
+          const [snippets, directories] = await Promise.all([
+            storageManager.getAllSnippets(),
+            storageManager.getAllDirectories(),
+          ])
+
+          progress.report({ increment: 30, message: '正在强制推送到云端...' })
+
+          const result = await cloudSyncManager.forcePushToCloud(snippets, directories, true)
+
+          progress.report({ increment: 100, message: '推送完成' })
+
+          if (result.success) {
+            vscode.window.showInformationMessage(`✅ 强制推送成功: ${result.message}`)
+            refreshTreeView()
+          } else {
+            vscode.window.showErrorMessage(`❌ 强制推送失败: ${result.message}`)
+          }
+        }
+      )
+    } catch (error) {
+      console.error('强制推送失败:', error)
+      vscode.window.showErrorMessage(`❌ 强制推送失败: ${error instanceof Error ? error.message : '未知错误'}`)
+    }
+  })
+
+  // 注册从Git仓库强制导入命令
+  const forceImportFromGitRepo = vscode.commands.registerCommand('starcode-snippets.forceImportFromGitRepo', async () => {
+    try {
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
+
+      if (!cloudSyncManager.isConfigured()) {
+        const action = await vscode.window.showWarningMessage('云端同步未配置，是否打开设置？', '打开设置', '取消')
+        if (action === '打开设置') {
+          vscode.commands.executeCommand('starcode-snippets.openSettings')
+        }
+        return
+      }
+
+      // 显示警告信息
+      const confirmAction = await vscode.window.showInformationMessage(
+        '🔄 从Git仓库强制导入数据\n\n此操作将：\n• 读取本地Git仓库中的最新数据\n• 更新VSCode中不一致的代码片段\n• 导入缺失的代码片段和目录\n\n这通常用于修复同步后VSCode与Git仓库数据不一致的问题。\n\n确定要继续吗？',
+        { modal: false },
+        '确定导入',
+        '取消'
+      )
+
+      if (confirmAction !== '确定导入') {
+        vscode.window.showInformationMessage('操作已取消')
+        return
+      }
+
+      // 使用进度条显示导入过程
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: '从Git仓库导入数据',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0, message: '正在读取Git仓库数据...' })
+
+          const result = await cloudSyncManager.forceImportFromGitRepo()
+
+          progress.report({ increment: 100, message: '导入完成' })
+
+          if (result.success) {
+            vscode.window.showInformationMessage(`✅ ${result.message}`)
+            refreshTreeView()
+          } else {
+            vscode.window.showErrorMessage(`❌ 导入失败: ${result.message}`)
+          }
+        }
+      )
+    } catch (error) {
+      console.error('从Git仓库强制导入失败:', error)
+      vscode.window.showErrorMessage(`❌ 从Git仓库强制导入失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
   })
 
@@ -1609,6 +2078,9 @@ function registerCommands(
     forceResetAutoSync,
     autoSyncStatus,
     reinitializeRepository,
+    pullFromCloud,
+    forcePushToCloud,
+    forceImportFromGitRepo,
   ]
 }
 

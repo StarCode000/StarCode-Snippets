@@ -51,7 +51,7 @@ export class SettingsManager {
       provider: provider,
       repositoryUrl: '',
       token: '',
-      localPath: PathUtils.getDefaultPathToken(provider), // 使用默认路径标识符
+      localPath: '', // 使用空路径，系统自动管理编辑器特定路径
       defaultBranch: 'main',
       authenticationMethod: 'token',
       sshKeyPath: '',
@@ -106,7 +106,7 @@ export class SettingsManager {
       provider: platformConfig.provider,
       repositoryUrl: platformConfig.repositoryUrl,
       token: platformConfig.token,
-      localPath: platformConfig.localPath || PathUtils.getDefaultPathToken(platformConfig.provider),
+      localPath: platformConfig.localPath || '',
       defaultBranch: platformConfig.defaultBranch,
       authenticationMethod: platformConfig.authenticationMethod,
       sshKeyPath: platformConfig.sshKeyPath,
@@ -262,6 +262,11 @@ export class SettingsManager {
           await new Promise(resolve => setTimeout(resolve, attempt * 500));
         }
         
+        // 在保存前检查配置是否已注册
+        if (attempt === 1) {
+          await this.ensureConfigurationAvailable();
+        }
+        
         await vscode.workspace.getConfiguration().update(
           this.MULTI_PLATFORM_CONFIG_KEY, 
           config, 
@@ -277,8 +282,17 @@ export class SettingsManager {
         lastError = error instanceof Error ? error : new Error(String(error));
         console.warn(`SettingsManager: 保存多平台配置失败 (第 ${attempt} 次尝试):`, lastError.message);
         
+        // 如果是配置未注册错误，等待配置系统初始化
+        if (lastError.message.includes('没有注册配置') || lastError.message.includes('NoPermissions')) {
+          if (attempt < maxRetries) {
+            // console.log(`检测到配置注册问题，等待 ${attempt * 1000}ms 后重试...`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            // 在重试前再次检查配置
+            await this.ensureConfigurationAvailable();
+          }
+        }
         // 如果是权限错误，等待更长时间再重试
-        if (lastError.message.includes('EPERM') || lastError.message.includes('NoPermissions')) {
+        else if (lastError.message.includes('EPERM')) {
           if (attempt < maxRetries) {
             // console.log(`检测到权限错误，等待 ${attempt * 1000}ms 后重试...`);
             await new Promise(resolve => setTimeout(resolve, attempt * 1000));
@@ -733,31 +747,49 @@ export class SettingsManager {
 
   /**
    * 获取有效的本地仓库路径
-   * 优先使用用户配置的路径，否则使用平台特定的默认路径
+   * 优先使用编辑器特定路径确保数据隔离
    * 支持默认路径标识符的解析
    */
   static getEffectiveLocalPath(): string {
     // 优先获取激活平台的配置
     const activePlatform = this.getActivePlatformConfig();
     if (activePlatform) {
-      // 解析默认路径标识符或使用实际路径
-      return PathUtils.resolveDefaultPathToken(activePlatform.localPath || '', activePlatform.provider);
+      // 解析默认路径标识符或使用实际路径，传入扩展上下文
+      return PathUtils.resolveDefaultPathToken(
+        activePlatform.localPath || '', 
+        activePlatform.provider, 
+        this.extensionContext || undefined
+      );
     }
     
     // 回退到传统配置
     const config = this.getCloudSyncConfig();
     const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
     
-    // 解析默认路径标识符或使用实际路径
-    return PathUtils.resolveDefaultPathToken(config.localPath || '', provider);
+    // 解析默认路径标识符或使用实际路径，传入扩展上下文
+    return PathUtils.resolveDefaultPathToken(
+      config.localPath || '', 
+      provider, 
+      this.extensionContext || undefined
+    );
   }
 
   /**
    * 获取路径描述信息，用于UI显示
+   * 优先使用编辑器特定的路径描述
    */
   static getLocalPathDescription(): string {
-    const effectivePath = this.getEffectiveLocalPath();
-    return PathUtils.getPathDescription(effectivePath);
+    // 优先获取激活平台的配置
+    const activePlatform = this.getActivePlatformConfig();
+    if (activePlatform) {
+      return PathUtils.getEditorSpecificPathDescription(activePlatform.provider, this.extensionContext || undefined);
+    }
+    
+    // 回退到传统配置
+    const config = this.getCloudSyncConfig();
+    const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
+    
+    return PathUtils.getEditorSpecificPathDescription(provider, this.extensionContext || undefined);
   }
 
   /**
@@ -775,5 +807,33 @@ export class SettingsManager {
     const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
     
     return PathUtils.isUsingDefaultPath(config.localPath || '', provider);
+  }
+
+  /**
+   * 确保配置在VSCode中可用，处理插件更新后的配置注册延迟问题
+   */
+  private static async ensureConfigurationAvailable(): Promise<void> {
+    const maxWaitTime = 2000; // 最大等待2秒
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const config = vscode.workspace.getConfiguration();
+        const configSchema = config.inspect(this.MULTI_PLATFORM_CONFIG_KEY);
+        
+        if (configSchema && configSchema.defaultValue !== undefined) {
+          // 配置已可用
+          return;
+        }
+        
+        // 等待50ms后重试
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (error) {
+        // 忽略检查错误，继续等待
+      }
+    }
+    
+    // 超时后记录警告但继续执行
+    console.warn(`配置 ${this.MULTI_PLATFORM_CONFIG_KEY} 等待超时，可能存在注册延迟`);
   }
 }

@@ -5,3 +5,5 @@ out/
 *.vsix
 !README.md
 !CHANGELOG.md
+temp-monaco/
+media/monaco-editor/

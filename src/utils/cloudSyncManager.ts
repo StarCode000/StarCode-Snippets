@@ -7,6 +7,8 @@ import * as crypto from 'crypto'
 import * as path from 'path'
 import * as fs from 'fs'
 import { simpleGit, SimpleGit, CleanOptions } from 'simple-git'
+import { diffLines, diffWordsWithSpace } from 'diff'
+import { diff3Merge } from 'node-diff3'
 
 
 interface SyncResult {
@@ -837,6 +839,401 @@ export class CloudSyncManager {
   }
 
   /**
+   * 检查两个代码片段是否有内容差异
+   */
+  private hasSnippetContentDifference(local: CodeSnippet, remote: CodeSnippet): boolean {
+    // 比较关键属性的差异
+    const localContent = {
+      name: local.name || '',
+      code: local.code || '',
+      category: local.category || '',
+      language: local.language || '',
+      fileName: local.fileName || '',
+      filePath: local.filePath || ''
+    }
+    
+    const remoteContent = {
+      name: remote.name || '',
+      code: remote.code || '',
+      category: remote.category || '',
+      language: remote.language || '',
+      fileName: remote.fileName || '',
+      filePath: remote.filePath || ''
+    }
+    
+    return JSON.stringify(localContent) !== JSON.stringify(remoteContent)
+  }
+
+  /**
+   * 检查两个目录是否有内容差异
+   */
+  private hasDirectoryContentDifference(local: Directory, remote: Directory): boolean {
+    // 比较关键属性的差异
+    const localContent = {
+      name: local.name || '',
+      description: (local as any).description || '',
+      order: local.order || 0
+    }
+    
+    const remoteContent = {
+      name: remote.name || '',
+      description: (remote as any).description || '',
+      order: remote.order || 0
+    }
+    
+    return JSON.stringify(localContent) !== JSON.stringify(remoteContent)
+  }
+
+  /**
+   * 解决代码片段冲突
+   * 使用基于时间戳的智能合并策略，支持复杂冲突的三路合并
+   */
+  private resolveSnippetConflict(local: CodeSnippet, remote: CodeSnippet): {
+    strategy: 'use_local' | 'use_remote' | 'use_newer' | 'auto_merge' | 'manual_merge_required'
+    resolved: CodeSnippet
+    needsManualMerge?: boolean
+    conflictData?: {
+      localContent: string
+      remoteContent: string
+      mergedContent?: string
+    }
+  } {
+    const localTime = local.createTime || 0
+    const remoteTime = remote.createTime || 0
+    
+    // 策略1: 优先使用有内容的版本（非空代码）
+    const localHasCode = (local.code || '').trim().length > 0
+    const remoteHasCode = (remote.code || '').trim().length > 0
+    
+    if (localHasCode && !remoteHasCode) {
+      return { strategy: 'use_local', resolved: local }
+    }
+    
+    if (!localHasCode && remoteHasCode) {
+      // 使用远程内容（V2版本不需要保留ID）
+      return { strategy: 'use_remote', resolved: remote }
+    }
+    
+    // 策略2: 如果都有代码内容，尝试智能合并
+    if (localHasCode && remoteHasCode) {
+      const localCode = local.code || ''
+      const remoteCode = remote.code || ''
+      
+      // 如果代码完全相同，只是其他属性不同，使用较新的版本
+      if (localCode === remoteCode) {
+        if (remoteTime > localTime) {
+          // 使用远程内容但保留本地ID
+          const resolvedSnippet: CodeSnippet = {
+            ...remote,
+            id: local.id // 保留本地ID以确保更新操作正常
+          }
+          return { strategy: 'use_newer', resolved: resolvedSnippet }
+        } else {
+          return { strategy: 'use_newer', resolved: local }
+        }
+      }
+      
+      // 尝试自动合并代码内容
+      const mergeResult = this.attemptCodeMerge(localCode, remoteCode)
+      
+      if (mergeResult.success && mergeResult.merged) {
+        // 自动合并成功，创建合并后的代码片段
+        const mergedSnippet: CodeSnippet = {
+          ...remote, // 使用远程的其他属性
+          code: mergeResult.merged,
+          createTime: Math.max(localTime, remoteTime) // 使用较新的时间戳
+        }
+        
+        return {
+          strategy: 'auto_merge',
+          resolved: mergedSnippet
+        }
+      } else {
+        // 自动合并失败，需要手动合并
+        const tempResolved = remoteTime > localTime ? remote : local
+        
+        return {
+          strategy: 'manual_merge_required',
+          resolved: tempResolved,
+          needsManualMerge: true,
+          conflictData: {
+            localContent: localCode,
+            remoteContent: remoteCode
+          }
+        }
+      }
+    }
+    
+    // 策略3: 如果都没有内容或其他情况，使用时间戳较新的版本
+    if (remoteTime > localTime) {
+      // 使用远程内容（V2版本不需要保留ID）
+      return { strategy: 'use_newer', resolved: remote }
+    } else if (localTime > remoteTime) {
+      return { strategy: 'use_newer', resolved: local }
+    }
+    
+    // 策略4: 时间戳相同时，优先保留本地版本（保守策略）
+    return { strategy: 'use_local', resolved: local }
+  }
+
+  /**
+   * 尝试自动合并代码内容
+   * 使用三路合并算法处理代码冲突
+   */
+  private attemptCodeMerge(localCode: string, remoteCode: string): {
+    success: boolean
+    merged?: string
+    hasConflicts?: boolean
+  } {
+    try {
+      // 简单情况：如果一方包含另一方的内容，可以安全合并
+      if (localCode.includes(remoteCode)) {
+        return { success: true, merged: localCode }
+      }
+      
+      if (remoteCode.includes(localCode)) {
+        return { success: true, merged: remoteCode }
+      }
+      
+      // 使用行级diff检查冲突复杂度
+      const lineDiff = diffLines(localCode, remoteCode)
+      const conflictLines = lineDiff.filter(change => change.added || change.removed)
+      
+      // 如果冲突较少且没有重叠修改，尝试简单合并
+      if (conflictLines.length <= 5) {
+        // 对于简单的添加操作，可以尝试合并
+        const hasOnlyAdditions = lineDiff.every(change => !change.removed || change.value.trim() === '')
+        
+        if (hasOnlyAdditions) {
+          // 简单的添加操作，合并内容
+          let merged = localCode
+          for (const change of lineDiff) {
+            if (change.added && change.value.trim()) {
+              merged += '\n' + change.value
+            }
+          }
+          return { success: true, merged: merged.trim() }
+        }
+      }
+      
+      // 复杂冲突，需要手动处理
+      return { success: false, hasConflicts: true }
+      
+    } catch (error) {
+      console.warn('自动合并失败:', error)
+      return { success: false }
+    }
+  }
+
+  /**
+   * 解决目录冲突
+   * 主要基于时间戳，但会保留有用的描述信息
+   */
+  private resolveDirectoryConflict(local: Directory, remote: Directory): {
+    strategy: 'use_local' | 'use_remote' | 'use_newer'
+    resolved: Directory
+  } {
+    const localTime = (local as any).createTime || 0
+    const remoteTime = (remote as any).createTime || 0
+    
+    // 策略: 使用时间戳较新的版本
+    if (remoteTime > localTime) {
+      // 使用远程内容（V2版本不需要保留ID）
+      return { strategy: 'use_newer', resolved: remote }
+    } else if (localTime > remoteTime) {
+      return { strategy: 'use_newer', resolved: local }
+    }
+    
+    // 时间戳相同时，保留本地版本
+    return { strategy: 'use_local', resolved: local }
+  }
+
+  /**
+   * 处理需要手动合并的冲突
+   * 为每个冲突创建临时文件并打开VSCode的合并编辑器
+   */
+  private async handleManualMergeConflicts(
+    snippetConflicts: Array<any>,
+    directoryConflicts: Array<any>
+  ): Promise<{
+    success: boolean
+    message: string
+    conflictCount: number
+    conflictFiles: string[]
+    resolvedSnippets?: CodeSnippet[]
+  }> {
+    const allConflicts = [...snippetConflicts, ...directoryConflicts]
+    const conflictCount = allConflicts.length
+    
+    if (conflictCount === 0) {
+      return {
+        success: true,
+        message: '没有需要手动解决的冲突',
+        conflictCount: 0,
+        conflictFiles: []
+      }
+    }
+
+    try {
+      // 为每个冲突创建临时合并文件
+      const tempDir = path.join(SettingsManager.getEffectiveLocalPath(), '.merge-conflicts')
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true })
+      }
+
+      const conflictFiles: string[] = []
+      const resolvedSnippets: CodeSnippet[] = []
+
+      // 处理代码片段冲突
+      for (let i = 0; i < snippetConflicts.length; i++) {
+        const conflict = snippetConflicts[i]
+        if (!conflict.conflictData) continue
+
+        const conflictFileName = `conflict_${i + 1}_${conflict.fullPath.replace(/[\/\\]/g, '_')}.txt`
+        const conflictFilePath = path.join(tempDir, conflictFileName)
+
+        // 创建冲突文件内容（使用标准的Git冲突标记）
+        const conflictContent = this.createConflictFileContent(
+          conflict.conflictData.localContent,
+          conflict.conflictData.remoteContent,
+          conflict.fullPath
+        )
+
+        fs.writeFileSync(conflictFilePath, conflictContent, 'utf8')
+        conflictFiles.push(conflictFilePath)
+      }
+
+      if (conflictFiles.length === 0) {
+        return {
+          success: true,
+          message: '所有冲突都已自动解决',
+          conflictCount: 0,
+          conflictFiles: []
+        }
+      }
+
+      // 询问用户是否要打开合并编辑器
+      const choice = await vscode.window.showWarningMessage(
+        `检测到 ${conflictCount} 个需要手动解决的代码冲突。\n\n系统已经为每个冲突创建了临时文件，您可以：\n1. 打开冲突文件手动编辑\n2. 使用自动解决方案（保留较新版本）\n3. 取消同步`,
+        { modal: true },
+        '打开冲突文件',
+        '自动解决（保留较新版本）',
+        '取消同步'
+      )
+
+      if (choice === '取消同步') {
+        // 清理临时文件
+        await this.cleanupTempConflictFiles(tempDir)
+        return {
+          success: false,
+          message: '用户取消了同步操作',
+          conflictCount,
+          conflictFiles: []
+        }
+      }
+
+      if (choice === '自动解决（保留较新版本）') {
+        // 使用自动解决策略
+        for (const conflict of snippetConflicts) {
+          if (conflict.conflictData) {
+            // 基于时间戳选择版本
+            const localTime = conflict.local.createTime || 0
+            const remoteTime = conflict.remote.createTime || 0
+            const resolved = remoteTime > localTime ? conflict.remote : conflict.local
+            resolvedSnippets.push(resolved)
+          }
+        }
+
+        // 清理临时文件
+        await this.cleanupTempConflictFiles(tempDir)
+
+        return {
+          success: true,
+          message: `已自动解决 ${conflictCount} 个冲突（保留较新版本）`,
+          conflictCount,
+          conflictFiles: [],
+          resolvedSnippets
+        }
+      }
+
+      if (choice === '打开冲突文件') {
+        // 打开第一个冲突文件
+        if (conflictFiles.length > 0) {
+          const document = await vscode.workspace.openTextDocument(conflictFiles[0])
+          await vscode.window.showTextDocument(document)
+          
+          // 显示指引消息
+          vscode.window.showInformationMessage(
+            `已打开冲突文件。请手动解决冲突后保存文件，然后重新执行同步。\n\n冲突标记说明：\n<<<<<<< LOCAL (当前设备)\n=======\n>>>>>>> REMOTE (远程设备)`,
+            '了解'
+          )
+        }
+
+        return {
+          success: false,
+          message: `请手动解决 ${conflictCount} 个冲突文件中的冲突，然后重新执行同步`,
+          conflictCount,
+          conflictFiles
+        }
+      }
+
+      // 默认返回失败
+      return {
+        success: false,
+        message: '未选择冲突解决方案',
+        conflictCount,
+        conflictFiles: []
+      }
+
+    } catch (error) {
+      console.error('处理手动合并冲突失败:', error)
+      return {
+        success: false,
+        message: `处理冲突失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        conflictCount,
+        conflictFiles: []
+      }
+    }
+  }
+
+  /**
+   * 创建冲突文件内容
+   * 使用标准的Git冲突标记格式
+   */
+  private createConflictFileContent(localContent: string, remoteContent: string, filePath: string): string {
+    return `冲突文件: ${filePath}
+时间: ${new Date().toLocaleString()}
+
+请解决以下冲突后保存文件，然后重新执行同步：
+
+<<<<<<< LOCAL (当前设备的版本)
+${localContent}
+=======
+${remoteContent}
+>>>>>>> REMOTE (远程设备的版本)
+
+说明:
+1. 保留您想要的内容，删除不需要的内容
+2. 删除冲突标记行 (<<<<<<< ======= >>>>>>>)
+3. 保存文件后重新执行同步
+4. 系统将读取您编辑后的内容作为最终版本
+`
+  }
+
+  /**
+   * 清理临时冲突文件
+   */
+  private async cleanupTempConflictFiles(tempDir: string): Promise<void> {
+    try {
+      if (fs.existsSync(tempDir)) {
+        await this.deleteDirectory(tempDir)
+      }
+    } catch (error) {
+      console.warn('清理临时冲突文件失败:', error)
+    }
+  }
+
+  /**
    * 将代码片段转换为JSON字符串
    */
   private snippetToJson(snippet: CodeSnippet): string {
@@ -953,7 +1350,7 @@ export class CloudSyncManager {
   /**
    * 从Git仓库文件系统读取代码片段和目录数据
    */
-  private async readDataFromGitRepo(): Promise<{ snippets: CodeSnippet[]; directories: Directory[] }> {
+  public async readDataFromGitRepo(): Promise<{ snippets: CodeSnippet[]; directories: Directory[] }> {
     const effectiveLocalPath = SettingsManager.getEffectiveLocalPath()
     
     const snippetsFile = path.join(effectiveLocalPath, 'snippets.json')
@@ -1014,10 +1411,9 @@ export class CloudSyncManager {
       // 读取Git仓库中的数据
       const repoData = await this.readDataFromGitRepo()
       
-      // 比较数据是否一致 - 兼容V1和V2格式
+      // 比较数据是否一致 - 使用V2格式的fullPath
       const getSortKey = (item: any) => {
-        // V2格式使用fullPath，V1格式使用id
-        return item.fullPath || item.id || ''
+        return item.fullPath || ''
       }
       
       const snippetsEqual = JSON.stringify(currentSnippets.sort((a, b) => getSortKey(a).localeCompare(getSortKey(b)))) === 
@@ -1132,6 +1528,138 @@ export class CloudSyncManager {
   }
 
   /**
+   * 从云端拉取数据（安全模式）
+   * 专门用于获取远程数据而不推送本地数据
+   */
+  public async pullFromCloud(): Promise<{ success: boolean; message: string; data?: { snippets: CodeSnippet[]; directories: Directory[] } }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: '云端同步未配置，请先配置Git仓库信息'
+      }
+    }
+
+    try {
+      // console.log('开始从云端拉取数据...')
+      
+      // 1. 获取Git实例
+      const git = await this.getGitInstance()
+      
+      // 2. 检查远程仓库状态
+      const remoteRefs = await git.listRemote(['--heads', 'origin'])
+      const isRemoteEmpty = !remoteRefs || remoteRefs.trim() === ''
+      
+      if (isRemoteEmpty) {
+        return {
+          success: false,
+          message: '远程仓库为空，没有数据可以拉取。\n\n这可能是一个新创建的仓库，请先在其他设备上推送数据。'
+        }
+      }
+      
+      // 3. 确保在正确的分支上
+      const targetBranch = this.config.defaultBranch || 'main'
+      try {
+        const currentBranch = await git.revparse(['--abbrev-ref', 'HEAD'])
+        if (currentBranch !== targetBranch) {
+          // 检查目标分支是否存在
+          const localBranches = await git.branchLocal()
+          if (!localBranches.all.includes(targetBranch)) {
+            // 如果目标分支不存在，从远程创建
+            await git.checkoutLocalBranch(targetBranch)
+          } else {
+            await git.checkout(targetBranch)
+          }
+        }
+      } catch (branchError) {
+        console.warn('分支检查失败:', branchError)
+      }
+      
+      // 4. 备份当前的本地数据（如果存在）
+      const effectiveLocalPath = SettingsManager.getEffectiveLocalPath()
+      const backupDir = path.join(effectiveLocalPath, '.backup-pull-' + Date.now())
+      
+      let hasLocalBackup = false
+      try {
+        const snippetsFile = path.join(effectiveLocalPath, 'snippets.json')
+        const directoriesFile = path.join(effectiveLocalPath, 'directories.json')
+        
+        if (fs.existsSync(snippetsFile) || fs.existsSync(directoriesFile)) {
+          fs.mkdirSync(backupDir, { recursive: true })
+          
+          if (fs.existsSync(snippetsFile)) {
+            fs.copyFileSync(snippetsFile, path.join(backupDir, 'snippets.json'))
+          }
+          if (fs.existsSync(directoriesFile)) {
+            fs.copyFileSync(directoriesFile, path.join(backupDir, 'directories.json'))
+          }
+          
+          hasLocalBackup = true
+          // console.log(`已备份本地数据到: ${backupDir}`)
+        }
+      } catch (backupError) {
+        console.warn('备份本地数据失败:', backupError)
+      }
+      
+      // 5. 拉取远程数据
+      try {
+        await this.gitPull(targetBranch)
+        // console.log('远程数据拉取成功')
+      } catch (pullError) {
+        const errorMessage = pullError instanceof Error ? pullError.message : '未知错误'
+        
+        // 恢复备份（如果有）
+        if (hasLocalBackup) {
+          try {
+            const snippetsBackup = path.join(backupDir, 'snippets.json')
+            const directoriesBackup = path.join(backupDir, 'directories.json')
+            
+            if (fs.existsSync(snippetsBackup)) {
+              fs.copyFileSync(snippetsBackup, path.join(effectiveLocalPath, 'snippets.json'))
+            }
+            if (fs.existsSync(directoriesBackup)) {
+              fs.copyFileSync(directoriesBackup, path.join(effectiveLocalPath, 'directories.json'))
+            }
+            
+            await this.deleteDirectory(backupDir)
+          } catch (restoreError) {
+            console.warn('恢复备份失败:', restoreError)
+          }
+        }
+        
+        return {
+          success: false,
+          message: `从云端拉取数据失败: ${errorMessage}\n\n请检查：\n• 网络连接是否正常\n• 认证信息是否正确\n• 远程仓库是否存在指定分支 '${targetBranch}'`
+        }
+      }
+      
+      // 6. 读取拉取的数据
+      const pulledData = await this.readDataFromGitRepo()
+      
+      // 7. 清理备份（拉取成功）
+      if (hasLocalBackup && fs.existsSync(backupDir)) {
+        try {
+          await this.deleteDirectory(backupDir)
+        } catch (cleanupError) {
+          console.warn('清理备份失败:', cleanupError)
+        }
+      }
+      
+      return {
+        success: true,
+        message: `成功从云端拉取数据！\n\n获取到：\n• ${pulledData.snippets.length} 个代码片段\n• ${pulledData.directories.length} 个目录\n\n数据已保存到本地Git仓库，您可以选择是否导入到VSCode。`,
+        data: pulledData
+      }
+      
+    } catch (error) {
+      console.error('从云端拉取数据失败:', error)
+      return {
+        success: false,
+        message: `从云端拉取数据失败: ${error instanceof Error ? error.message : '未知错误'}`
+      }
+    }
+  }
+
+  /**
    * 执行完整同步（重新实现的Git版本）
    */
   public async performSync(currentSnippets: CodeSnippet[], currentDirectories: Directory[]): Promise<SyncResult> {
@@ -1141,8 +1669,6 @@ export class CloudSyncManager {
         message: '云端同步未配置，请先配置Git仓库信息',
       }
     }
-
-
 
     // 更新同步状态
     const status = SettingsManager.getCloudSyncStatus()
@@ -1211,15 +1737,28 @@ export class CloudSyncManager {
         // 如果分支操作失败，继续执行但记录警告
       }
 
-      // 3. 先拉取远程变更，避免冲突
-      // console.log('开始拉取远程变更...')
+      // 3. 检查远程仓库是否为空（数据安全检查）
+      let isRemoteEmpty = false
       let remotePullSuccess = false
+      let remoteHasData = false
+
+      try {
+        // 首先检查远程是否有分支
+        const remoteRefs = await git.listRemote(['--heads', 'origin'])
+        isRemoteEmpty = !remoteRefs || remoteRefs.trim() === ''
+        
+        if (!isRemoteEmpty) {
+          // 远程不为空，尝试拉取并检查是否有数据
       try {
         await this.gitPull()
-        // console.log('远程变更拉取成功')
         remotePullSuccess = true
+            
+            // 拉取成功后，检查是否有实际的代码片段数据
+            const remoteData = await this.readDataFromGitRepo()
+            remoteHasData = remoteData.snippets.length > 0 || remoteData.directories.length > 0
+            
+            // console.log(`远程数据检查: snippets=${remoteData.snippets.length}, directories=${remoteData.directories.length}`)
       } catch (pullError) {
-        // 检查是否是因为远程分支不存在
         const errorMessage = pullError instanceof Error ? pullError.message : '未知错误'
         
         // Gitee特殊错误处理
@@ -1251,40 +1790,365 @@ export class CloudSyncManager {
            throw pullError
         }
       }
-
-      // 4. 检测本地变更（在拉取远程变更后）
-      const localChanges = await this.detectLocalChanges(currentSnippets, currentDirectories)
-      // console.log('本地变更检测结果:', localChanges)
-
-      // 5. 如果有本地变更或者是首次推送，写入数据到Git仓库
-      const needsDataWrite = !remotePullSuccess || 
-                            localChanges.hasChanges && (localChanges.type === 'local_only' || localChanges.type === 'both_differ')
-      
-      if (needsDataWrite) {
-        // console.log('写入本地数据到Git仓库文件系统...')
-        // 只有在真正有变更时才更新时间戳
-        const hasRealChanges = localChanges.hasChanges && localChanges.type !== 'none'
-        await this.writeDataToGitRepo(currentSnippets, currentDirectories, hasRealChanges)
+        }
+      } catch (remoteCheckError) {
+        console.warn('检查远程仓库状态失败:', remoteCheckError)
+        // 如果无法检查远程状态，假设为首次推送
+        isRemoteEmpty = true
       }
 
-      // 6. 检查Git状态并确保有内容可以提交
+      // 4. 智能首次同步：当本地无数据但远程有数据时，自动拉取并合并
+      const hasLocalData = currentSnippets.length > 0 || currentDirectories.length > 0
+      let mergedSnippets = currentSnippets
+      let mergedDirectories = currentDirectories
+      let autoMerged = false
+      
+      // 保存合并结果用于后续显示
+      let finalSnippetMergeResult: any = null
+      let finalDirectoryMergeResult: any = null
+      
+      if (!hasLocalData && remoteHasData) {
+        // 本地没有数据但远程有数据，自动拉取远程数据进行合并
+        try {
+          // console.log('检测到首次同步场景，自动拉取远程数据进行合并...')
+          const remoteData = await this.readDataFromGitRepo()
+          
+          mergedSnippets = [...currentSnippets, ...remoteData.snippets]
+          mergedDirectories = [...currentDirectories, ...remoteData.directories]
+          autoMerged = true
+          
+          // console.log(`自动合并完成: ${remoteData.snippets.length} 个远程代码片段, ${remoteData.directories.length} 个远程目录`)
+        } catch (readError) {
+          // 如果读取远程数据失败，但已经成功拉取了，说明数据可能是空的或格式有问题
+          console.warn('读取远程数据失败，但拉取成功，可能远程数据为空或格式异常:', readError)
+          // 继续执行，使用原始的本地数据
+        }
+      } else if (!hasLocalData && !isRemoteEmpty && !remotePullSuccess) {
+        // 本地没有数据，远程不为空但拉取失败 - 这是真正需要警告的情况
+        return {
+          success: false,
+          message: `⚠️ 首次同步失败！\n\n检测到以下情况：\n• 本地没有代码片段数据\n• 远程仓库不为空\n• 无法从远程拉取数据\n\n可能原因：\n• 网络连接问题\n• 认证权限不足\n• 分支配置错误\n\n请检查网络和配置后重试，或使用"从云端拉取数据"功能手动拉取。`,
+        }
+      } else if (hasLocalData && remoteHasData && remotePullSuccess) {
+        // 本地和远程都有数据，进行智能合并
+        try {
+          // console.log('检测到本地和远程都有数据，进行智能合并...')
+          const remoteData = await this.readDataFromGitRepo()
+          
+          // 智能合并算法 - 处理代码片段冲突和内容差异
+          const mergeSnippets = (local: CodeSnippet[], remote: CodeSnippet[]): {
+            merged: CodeSnippet[]
+            conflicts: Array<{
+              id: string
+              fullPath: string
+              local: CodeSnippet
+              remote: CodeSnippet
+              resolution: 'use_local' | 'use_remote' | 'use_newer' | 'auto_merge' | 'manual_merge_required'
+              needsManualMerge?: boolean
+              conflictData?: {
+                localContent: string
+                remoteContent: string
+                mergedContent?: string
+              }
+            }>
+            additions: number
+            manualMergeRequired: boolean
+          } => {
+            const merged = [...local]
+            const conflicts: Array<any> = []
+            let additions = 0
+            let manualMergeRequired = false
+            
+            // 创建本地数据的映射，使用 fullPath 作为主键
+            const localMap = new Map<string, CodeSnippet>()
+            for (const snippet of local) {
+              const key = (snippet as any).fullPath
+              if (key) {
+                localMap.set(key, snippet)
+              }
+            }
+            
+            for (const remoteSnippet of remote) {
+              const remoteKey = (remoteSnippet as any).fullPath
+              const localSnippet = remoteKey ? localMap.get(remoteKey) : undefined
+              
+              if (!localSnippet) {
+                // 远程有而本地没有的代码片段，直接添加
+                merged.push(remoteSnippet)
+                additions++
+              } else {
+                // 检查内容是否有差异
+                const hasContentDiff = this.hasSnippetContentDifference(localSnippet, remoteSnippet)
+                
+                if (hasContentDiff) {
+                  // 有内容差异，需要智能解决冲突
+                  const resolution = this.resolveSnippetConflict(localSnippet, remoteSnippet)
+                  
+                  const conflictRecord = {
+                    id: remoteSnippet.id,
+                    fullPath: remoteKey,
+                    local: localSnippet,
+                    remote: remoteSnippet,
+                    resolution: resolution.strategy,
+                    needsManualMerge: resolution.needsManualMerge,
+                    conflictData: resolution.conflictData
+                  }
+                  
+                  conflicts.push(conflictRecord)
+                  
+                  // 如果需要手动合并，标记整个合并过程
+                  if (resolution.needsManualMerge) {
+                    manualMergeRequired = true
+                  }
+                  
+                  // 根据解决策略更新合并结果
+                  const localIndex = merged.findIndex(s => (s as any).fullPath === remoteKey)
+                  if (localIndex >= 0) {
+                    merged[localIndex] = resolution.resolved
+                  }
+                }
+                // 如果没有内容差异，保持本地版本不变
+              }
+            }
+            
+            return { merged, conflicts, additions, manualMergeRequired }
+          }
+          
+          const mergeDirectories = (local: Directory[], remote: Directory[]): {
+            merged: Directory[]
+            conflicts: Array<{
+              id: string
+              fullPath: string
+              local: Directory
+              remote: Directory
+              resolution: 'use_local' | 'use_remote' | 'use_newer'
+              needsManualMerge?: boolean
+            }>
+            additions: number
+            manualMergeRequired: boolean
+          } => {
+            const merged = [...local]
+            const conflicts: Array<any> = []
+            let additions = 0
+            let manualMergeRequired = false
+            
+            // 创建本地数据的映射
+            const localMap = new Map<string, Directory>()
+            for (const directory of local) {
+              const key = (directory as any).fullPath
+              if (key) {
+                localMap.set(key, directory)
+              }
+            }
+            
+            for (const remoteDir of remote) {
+              const remoteKey = (remoteDir as any).fullPath
+              const localDir = remoteKey ? localMap.get(remoteKey) : undefined
+              
+              if (!localDir) {
+                // 远程有而本地没有的目录，直接添加
+                merged.push(remoteDir)
+                additions++
+              } else {
+                // 检查目录属性是否有差异
+                const hasContentDiff = this.hasDirectoryContentDifference(localDir, remoteDir)
+                
+                if (hasContentDiff) {
+                  // 有差异，需要解决冲突
+                  const resolution = this.resolveDirectoryConflict(localDir, remoteDir)
+                  
+                  const conflictRecord = {
+                    id: remoteDir.id,
+                    fullPath: remoteKey,
+                    local: localDir,
+                    remote: remoteDir,
+                    resolution: resolution.strategy,
+                    needsManualMerge: false // 目录冲突通常不需要手动合并
+                  }
+                  
+                  conflicts.push(conflictRecord)
+                  
+                  // 根据解决策略更新合并结果
+                  const localIndex = merged.findIndex(d => (d as any).fullPath === remoteKey)
+                  if (localIndex >= 0) {
+                    merged[localIndex] = resolution.resolved
+                  }
+                }
+              }
+            }
+            
+            return { merged, conflicts, additions, manualMergeRequired }
+          }
+          
+          const originalSnippetCount = mergedSnippets.length
+          const originalDirCount = mergedDirectories.length
+          
+          const snippetMergeResult = mergeSnippets(currentSnippets, remoteData.snippets)
+          const directoryMergeResult = mergeDirectories(currentDirectories, remoteData.directories)
+          
+          // 保存合并结果用于后续显示
+          finalSnippetMergeResult = snippetMergeResult
+          finalDirectoryMergeResult = directoryMergeResult
+          
+          mergedSnippets = snippetMergeResult.merged
+          mergedDirectories = directoryMergeResult.merged
+          
+          const newSnippetCount = snippetMergeResult.additions
+          const newDirCount = directoryMergeResult.additions
+          const totalConflicts = snippetMergeResult.conflicts.length + directoryMergeResult.conflicts.length
+          
+          if (newSnippetCount > 0 || newDirCount > 0 || totalConflicts > 0) {
+            autoMerged = true
+            // console.log(`智能合并完成: 新增 ${newSnippetCount} 个远程代码片段, ${newDirCount} 个远程目录, 解决 ${totalConflicts} 个冲突`)
+            
+            // 检查是否有需要手动合并的冲突
+            const needsManualMerge = snippetMergeResult.manualMergeRequired || directoryMergeResult.manualMergeRequired
+            
+            if (needsManualMerge) {
+              // 处理需要手动合并的冲突
+              const manualMergeResult = await this.handleManualMergeConflicts(
+                snippetMergeResult.conflicts.filter(c => c.needsManualMerge),
+                directoryMergeResult.conflicts.filter(c => c.needsManualMerge)
+              )
+              
+              if (!manualMergeResult.success) {
+                // 用户取消了手动合并，返回错误
+                return {
+                  success: false,
+                  message: `同步中断：检测到 ${manualMergeResult.conflictCount} 个需要手动解决的冲突。\n\n${manualMergeResult.message}\n\n请解决冲突后重新执行同步。`,
+                  conflictsDetected: true,
+                  conflictDetails: manualMergeResult.conflictFiles
+                }
+              }
+              
+              // 手动合并成功，更新合并结果
+              if (manualMergeResult.resolvedSnippets) {
+                // 更新解决了的代码片段
+                for (const resolvedSnippet of manualMergeResult.resolvedSnippets) {
+                  const index = mergedSnippets.findIndex(s => ((s as any).fullPath || s.id) === ((resolvedSnippet as any).fullPath || resolvedSnippet.id))
+                  if (index >= 0) {
+                    mergedSnippets[index] = resolvedSnippet
+                  }
+                }
+              }
+            }
+            
+            // 记录冲突解决详情（用于调试和用户反馈）
+            if (totalConflicts > 0) {
+              console.log('冲突解决详情:')
+              snippetMergeResult.conflicts.forEach(conflict => {
+                console.log(`- 代码片段 "${conflict.fullPath}": ${conflict.resolution} (本地时间: ${conflict.local.createTime}, 远程时间: ${conflict.remote.createTime})`)
+              })
+              directoryMergeResult.conflicts.forEach(conflict => {
+                console.log(`- 目录 "${conflict.fullPath}": ${conflict.resolution}`)
+              })
+            }
+          }
+        } catch (readError) {
+          console.warn('读取远程数据失败，使用本地数据:', readError)
+        }
+      }
+
+      // 如果进行了自动合并，需要将合并后的数据同步到VSCode存储
+      if (autoMerged && this.storageManager) {
+        try {
+          // console.log('开始将合并后的数据同步到VSCode存储...')
+          
+          // 检查项目是否需要同步到VSCode存储
+          let needsUpdate = false
+          
+          // 检查是否有新增的目录
+          for (const directory of mergedDirectories) {
+            const existingDir = currentDirectories.find(d => (d as any).fullPath === (directory as any).fullPath)
+            if (!existingDir) {
+              needsUpdate = true
+              break
+            } else {
+              // 检查是否需要更新现有目录
+              const hasDirectoryDiff = this.hasDirectoryContentDifference(existingDir, directory)
+              if (hasDirectoryDiff) {
+                needsUpdate = true
+                break
+              }
+            }
+          }
+          
+          // 检查是否有新增或更新的代码片段
+          if (!needsUpdate) {
+            for (const snippet of mergedSnippets) {
+              const existingSnippet = currentSnippets.find(s => (s as any).fullPath === (snippet as any).fullPath)
+              if (!existingSnippet) {
+                needsUpdate = true
+                break
+              } else {
+                // 检查是否需要更新现有代码片段
+                const hasSnippetDiff = this.hasSnippetContentDifference(existingSnippet, snippet)
+                if (hasSnippetDiff) {
+                  needsUpdate = true
+                  break
+                }
+              }
+            }
+          }
+          
+          // 如果需要更新，调用强制导入方法
+          if (needsUpdate) {
+            // console.log('检测到需要同步的数据变更，调用强制导入方法...')
+            const importResult = await this.forceImportFromGitRepo()
+            if (!importResult.success) {
+              console.error('强制导入失败:', importResult.message)
+            }
+          }
+          
+          // 清除缓存以确保界面更新
+          if (this.storageManager.clearCache) {
+            this.storageManager.clearCache()
+          }
+          
+          // console.log('合并后的数据已同步到VSCode存储')
+        } catch (importError) {
+          console.error('同步合并数据到VSCode存储失败:', importError)
+          // 不中断同步流程，但记录错误
+        }
+      }
+
+      // 5. 检测本地变更（使用合并后的数据）
+      const localChanges = await this.detectLocalChanges(mergedSnippets, mergedDirectories)
+      // console.log('本地变更检测结果:', localChanges)
+
+      // 6. 决定是否需要写入数据
+      const needsDataWrite = isRemoteEmpty || // 远程为空，首次推送
+                            autoMerged || // 进行了自动合并，需要写入合并后的数据
+                            (remotePullSuccess && localChanges.hasChanges && 
+                             (localChanges.type === 'local_only' || localChanges.type === 'both_differ')) || // 拉取成功且有本地变更
+                            (!remotePullSuccess && hasLocalData && isRemoteEmpty) // 拉取失败但确认远程为空且本地有数据
+      
+      if (needsDataWrite) {
+        // console.log('写入数据到Git仓库文件系统...')
+        // 如果进行了自动合并，总是更新时间戳；否则只有在真正有变更时才更新时间戳
+        const shouldUpdateTimestamp = autoMerged || (localChanges.hasChanges && localChanges.type !== 'none')
+        await this.writeDataToGitRepo(mergedSnippets, mergedDirectories, shouldUpdateTimestamp)
+      }
+
+      // 7. 检查Git状态并确保有内容可以提交
       const gitStatus = await this.gitStatus()
       // console.log(`Git状态 - 文件变更: ${gitStatus.files.length}, 是否为仓库: ${gitStatus.isClean()}`)
       
-      // 如果没有任何文件且有数据要同步，强制写入数据（兼容空仓库情况）
-      if (gitStatus.files.length === 0 && (currentSnippets.length > 0 || currentDirectories.length > 0)) {
+      // 如果没有任何文件且有数据要同步，强制写入数据（使用合并后的数据）
+      const hasMergedData = mergedSnippets.length > 0 || mergedDirectories.length > 0
+      if (gitStatus.files.length === 0 && hasMergedData && (isRemoteEmpty || !remoteHasData || autoMerged)) {
         // console.log('检测到空仓库但有数据要同步，强制写入数据...')
         // 重新检查本地变更，以确定是否真的需要更新时间戳
-        const emptyRepoChanges = await this.detectLocalChanges(currentSnippets, currentDirectories)
-        const shouldUpdateTimestamp = emptyRepoChanges.hasChanges && emptyRepoChanges.type !== 'none'
-        await this.writeDataToGitRepo(currentSnippets, currentDirectories, shouldUpdateTimestamp)
+        const emptyRepoChanges = await this.detectLocalChanges(mergedSnippets, mergedDirectories)
+        const shouldUpdateTimestamp = autoMerged || (emptyRepoChanges.hasChanges && emptyRepoChanges.type !== 'none')
+        await this.writeDataToGitRepo(mergedSnippets, mergedDirectories, shouldUpdateTimestamp)
         
         // 重新检查状态
         const newGitStatus = await this.gitStatus()
         // console.log(`写入数据后的Git状态 - 文件变更: ${newGitStatus.files.length}`)
       }
 
-      // 7. 提交变更（如果有的话）
+      // 8. 提交变更（如果有的话）
       const finalGitStatus = await this.gitStatus()
       const hasUncommittedChanges = finalGitStatus.files.length > 0
 
@@ -1303,7 +2167,7 @@ export class CloudSyncManager {
         // console.log('没有检测到需要提交的变更')
       }
 
-      // 8. 确保我们在正确的分支上并推送
+      // 9. 确保我们在正确的分支上并推送
       try {
         // 再次确认当前分支
         const currentBranch = await git.revparse(['--abbrev-ref', 'HEAD'])
@@ -1317,7 +2181,7 @@ export class CloudSyncManager {
         console.warn('推送前分支检查失败:', branchCheckError)
       }
 
-      // 9. 推送到远程（只有在有提交时才推送）
+      // 10. 推送到远程（只有在有提交时才推送）
       if (hasUncommittedChanges) {
         // console.log(`开始推送分支 ${targetBranch} 到远程仓库...`)
         try {
@@ -1378,16 +2242,84 @@ export class CloudSyncManager {
         }
       }
 
-      // 10. 更新同步状态
+      // 11. 更新同步状态
       const finalStatus = SettingsManager.getCloudSyncStatus()
       finalStatus.lastSyncTime = Date.now()
       finalStatus.lastError = null
       finalStatus.isConnected = true
       await SettingsManager.saveCloudSyncStatus(finalStatus)
 
-      const successMessage = hasUncommittedChanges 
-        ? `同步成功！已提交并推送 ${currentSnippets.length} 个代码片段和 ${currentDirectories.length} 个目录到分支 ${targetBranch}`
-        : `同步成功！数据已是最新状态（分支: ${targetBranch}）`
+      // 12. 确保VSCode界面刷新显示最新数据
+      if (autoMerged && this.storageManager) {
+        try {
+          // 强制刷新缓存和界面
+          if (this.storageManager.clearCache) {
+            this.storageManager.clearCache()
+          }
+          
+          // 触发树视图刷新
+          if (this.context) {
+            // 通过命令刷新树视图
+            await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
+          }
+        } catch (refreshError) {
+          console.warn('刷新界面失败:', refreshError)
+        }
+      }
+
+      // 构建成功消息
+      let successMessage = ''
+      if (hasUncommittedChanges) {
+        successMessage = `同步成功！已提交并推送 ${mergedSnippets.length} 个代码片段和 ${mergedDirectories.length} 个目录到分支 ${targetBranch}`
+        if (autoMerged) {
+          const remoteCount = mergedSnippets.length - currentSnippets.length
+          const remoteDirCount = mergedDirectories.length - currentDirectories.length
+          
+          if (remoteCount > 0 || remoteDirCount > 0) {
+            successMessage += `\n\n🔄 智能合并：已自动合并远程数据并导入到VSCode中`
+            if (remoteCount > 0) successMessage += `\n• 新增代码片段：${remoteCount} 个`
+            if (remoteDirCount > 0) successMessage += `\n• 新增目录：${remoteDirCount} 个`
+            
+            // 添加冲突解决信息
+            if (finalSnippetMergeResult) {
+              const autoResolvedConflicts = finalSnippetMergeResult.conflicts.filter((c: any) => 
+                c.resolution === 'auto_merge' || c.resolution === 'use_newer' || c.resolution === 'use_local' || c.resolution === 'use_remote'
+              ).length
+              if (autoResolvedConflicts > 0) {
+                successMessage += `\n• 自动解决冲突：${autoResolvedConflicts} 个（使用智能合并算法）`
+              }
+            }
+            
+            successMessage += `\n\n所有设备的数据现已同步，您可以在侧边栏中查看完整的代码片段列表。\n\n💡 如果发现VSCode中的数据与Git仓库不一致，可以使用"从Git仓库强制导入"命令修复。`
+          } else {
+            if (finalSnippetMergeResult && finalDirectoryMergeResult) {
+              const totalAutoResolved = finalSnippetMergeResult.conflicts.length + finalDirectoryMergeResult.conflicts.length
+              if (totalAutoResolved > 0) {
+                successMessage += `\n\n🔄 智能合并：已自动解决 ${totalAutoResolved} 个数据冲突`
+              } else {
+                successMessage += `\n\n🔄 数据已是最新状态，无需合并`
+              }
+            } else {
+              successMessage += `\n\n🔄 数据已是最新状态，无需合并`
+            }
+          }
+        }
+      } else {
+        successMessage = `同步成功！数据已是最新状态（分支: ${targetBranch}）`
+        if (autoMerged) {
+          const remoteCount = mergedSnippets.length - currentSnippets.length
+          const remoteDirCount = mergedDirectories.length - currentDirectories.length
+          if (remoteCount > 0 || remoteDirCount > 0) {
+            successMessage += `\n\n🔄 智能合并：已自动导入远程数据到VSCode中`
+            if (remoteCount > 0) successMessage += `\n• 新增代码片段：${remoteCount} 个`
+            if (remoteDirCount > 0) successMessage += `\n• 新增目录：${remoteDirCount} 个`
+            successMessage += `\n• 自动解决了数据冲突（保留最新版本）`
+            successMessage += `\n\n所有设备的数据现已同步，您可以在侧边栏中查看完整的代码片段列表。\n\n💡 如果发现VSCode中的数据与Git仓库不一致，可以使用"从Git仓库强制导入"命令修复。`
+          } else {
+            successMessage += `\n\n🔄 数据已自动合并并解决冲突（保留最新版本）`
+          }
+        }
+      }
 
       return {
         success: true,
@@ -1548,6 +2480,244 @@ export class CloudSyncManager {
     } catch (error) {
       console.error('清空本地代码库失败:', error)
       throw error
+    }
+  }
+
+  /**
+   * 从Git仓库强制同步数据到VSCode存储
+   * 用于修复同步不一致的问题
+   */
+  public async forceImportFromGitRepo(): Promise<{ success: boolean; message: string; imported: { snippets: number; directories: number } }> {
+    if (!this.storageManager) {
+      return {
+        success: false,
+        message: 'StorageManager 未初始化',
+        imported: { snippets: 0, directories: 0 }
+      }
+    }
+
+    // 检查是否支持V2版本的路径操作
+    const supportsV2Path = this.storageManager.getSnippetByPath && this.storageManager.getDirectoryByPath
+
+    try {
+      // 1. 从Git仓库读取最新数据
+      const gitData = await this.readDataFromGitRepo()
+      
+      if (gitData.snippets.length === 0 && gitData.directories.length === 0) {
+        return {
+          success: true,
+          message: 'Git仓库中没有数据需要导入',
+          imported: { snippets: 0, directories: 0 }
+        }
+      }
+
+      // 2. 获取当前VSCode存储中的数据
+      const currentSnippets = await this.storageManager.getAllSnippets()
+      const currentDirectories = await this.storageManager.getAllDirectories()
+
+      let importedSnippets = 0
+      let importedDirectories = 0
+
+      // 3. 同步目录
+      for (const gitDirectory of gitData.directories) {
+        const existingDir = currentDirectories.find((d: Directory) => 
+          (d as any).fullPath === (gitDirectory as any).fullPath
+        )
+
+        if (!existingDir) {
+          // 新增目录
+          await this.storageManager.createDirectory(gitDirectory)
+          importedDirectories++
+        } else {
+          // 检查并更新现有目录
+          const hasDirectoryDiff = this.hasDirectoryContentDifference(existingDir, gitDirectory)
+          if (hasDirectoryDiff) {
+            // V2版本：删除现有目录并重新创建（因为没有基于路径的更新方法）
+            // 注意：这里使用现有目录的ID，因为storageManager的deleteDirectory方法需要ID
+            if ((existingDir as any).id) {
+              await this.storageManager.deleteDirectory((existingDir as any).id)
+            } else {
+              // 如果没有ID，尝试使用路径生成的ID
+              const pathBasedId = require('./pathBasedManager').PathBasedManager.generateIdFromPath((gitDirectory as any).fullPath)
+              await this.storageManager.deleteDirectory(pathBasedId)
+            }
+            await this.storageManager.createDirectory(gitDirectory)
+            importedDirectories++
+          }
+        }
+      }
+
+      // 4. 同步代码片段
+      for (const gitSnippet of gitData.snippets) {
+        const existingSnippet = currentSnippets.find((s: CodeSnippet) => 
+          (s as any).fullPath === (gitSnippet as any).fullPath
+        )
+
+        if (!existingSnippet) {
+          // 新增代码片段
+          await this.storageManager.saveSnippet(gitSnippet)
+          importedSnippets++
+        } else {
+          // 检查并更新现有代码片段
+          const hasSnippetDiff = this.hasSnippetContentDifference(existingSnippet, gitSnippet)
+          if (hasSnippetDiff) {
+            // V2版本：删除现有代码片段并重新创建（因为没有基于路径的更新方法）
+            // 注意：这里使用现有代码片段的ID，因为storageManager的deleteSnippet方法需要ID
+            if ((existingSnippet as any).id) {
+              await this.storageManager.deleteSnippet((existingSnippet as any).id)
+            } else {
+              // 如果没有ID，尝试使用路径生成的ID
+              const pathBasedId = require('./pathBasedManager').PathBasedManager.generateIdFromPath((gitSnippet as any).fullPath)
+              await this.storageManager.deleteSnippet(pathBasedId)
+            }
+            await this.storageManager.saveSnippet(gitSnippet)
+            importedSnippets++
+          }
+        }
+      }
+
+      // 5. 清除缓存并刷新界面
+      if (this.storageManager.clearCache) {
+        this.storageManager.clearCache()
+      }
+
+      if (this.context) {
+        try {
+          await vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
+        } catch (refreshError) {
+          console.warn('刷新界面失败:', refreshError)
+        }
+      }
+
+      return {
+        success: true,
+        message: `成功从Git仓库导入数据！\n\n• 更新/新增代码片段：${importedSnippets} 个\n• 更新/新增目录：${importedDirectories} 个\n\n所有数据现已与Git仓库保持一致。`,
+        imported: { snippets: importedSnippets, directories: importedDirectories }
+      }
+
+    } catch (error) {
+      console.error('从Git仓库强制导入数据失败:', error)
+      return {
+        success: false,
+        message: `导入失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        imported: { snippets: 0, directories: 0 }
+      }
+    }
+  }
+
+  /**
+   * 强制推送到云端（危险操作）
+   * 用于在用户明确确认的情况下覆盖远程数据
+   */
+  public async forcePushToCloud(currentSnippets: CodeSnippet[], currentDirectories: Directory[], userConfirmed: boolean = false): Promise<SyncResult> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: '云端同步未配置，请先配置Git仓库信息'
+      }
+    }
+
+    if (!userConfirmed) {
+      return {
+        success: false,
+        message: '⚠️ 强制推送需要用户确认！\n\n强制推送会覆盖远程仓库的所有数据，这个操作不可撤销。\n\n如果您确定要继续，请使用确认参数调用此方法。'
+      }
+    }
+
+    // 更新同步状态
+    const status = SettingsManager.getCloudSyncStatus()
+    status.isSyncing = true
+    await SettingsManager.saveCloudSyncStatus(status)
+
+    try {
+      // console.log('开始强制推送到云端...')
+      
+      // 1. 获取Git实例
+      const git = await this.getGitInstance()
+      
+      // 2. 确保在正确的分支上
+      const targetBranch = this.config.defaultBranch || 'main'
+      try {
+        const currentBranch = await git.revparse(['--abbrev-ref', 'HEAD'])
+        if (currentBranch !== targetBranch) {
+          const localBranches = await git.branchLocal()
+          if (!localBranches.all.includes(targetBranch)) {
+            await git.checkoutLocalBranch(targetBranch)
+          } else {
+            await git.checkout(targetBranch)
+          }
+        }
+      } catch (branchError) {
+        console.warn('分支检查失败:', branchError)
+      }
+      
+      // 3. 强制写入本地数据（始终更新时间戳）
+      await this.writeDataToGitRepo(currentSnippets, currentDirectories, true)
+      
+      // 4. 检查是否有变更需要提交
+      const gitStatus = await this.gitStatus()
+      const hasChanges = gitStatus.files.length > 0
+      
+      if (hasChanges) {
+        // 5. 添加所有变更并提交
+        await this.gitAddAll()
+        const commitMessage = this.generateCommitMessage() + ' [FORCE PUSH]'
+        await this.gitCommit(commitMessage)
+        // console.log(`已提交变更: ${commitMessage}`)
+      } else {
+        // 如果没有变更，创建一个空提交以确保推送
+        const emptyCommitMessage = this.generateCommitMessage() + ' [FORCE PUSH - NO CHANGES]'
+        await git.commit(emptyCommitMessage, ['--allow-empty'])
+        // console.log(`已创建空提交: ${emptyCommitMessage}`)
+      }
+      
+      // 6. 强制推送到远程
+      try {
+        await git.push('origin', targetBranch, ['--force', '--set-upstream'])
+        // console.log('强制推送成功')
+      } catch (pushError) {
+        const errorMessage = pushError instanceof Error ? pushError.message : '未知错误'
+        
+        if (errorMessage.includes('no upstream branch') || 
+            errorMessage.includes('src refspec')) {
+          // 尝试设置上游分支
+          await git.push('origin', targetBranch, ['--set-upstream', '--force'])
+          // console.log('设置上游分支并强制推送成功')
+        } else {
+          throw pushError
+        }
+      }
+      
+      // 7. 更新同步状态
+      const finalStatus = SettingsManager.getCloudSyncStatus()
+      finalStatus.lastSyncTime = Date.now()
+      finalStatus.lastError = null
+      finalStatus.isConnected = true
+      await SettingsManager.saveCloudSyncStatus(finalStatus)
+      
+      return {
+        success: true,
+        message: `强制推送成功！\n\n已强制覆盖远程仓库数据：\n• ${currentSnippets.length} 个代码片段\n• ${currentDirectories.length} 个目录\n\n分支: ${targetBranch}\n\n⚠️ 远程仓库的历史数据已被覆盖。`
+      }
+      
+    } catch (error) {
+      console.error('强制推送失败:', error)
+      
+      // 更新错误状态
+      const errorStatus = SettingsManager.getCloudSyncStatus()
+      errorStatus.lastError = error instanceof Error ? error.message : '未知错误'
+      errorStatus.isConnected = false
+      await SettingsManager.saveCloudSyncStatus(errorStatus)
+      
+      return {
+        success: false,
+        message: `强制推送失败: ${error instanceof Error ? error.message : '未知错误'}`
+      }
+    } finally {
+      // 清除同步状态
+      const finalStatus = SettingsManager.getCloudSyncStatus()
+      finalStatus.isSyncing = false
+      await SettingsManager.saveCloudSyncStatus(finalStatus)
     }
   }
 }
