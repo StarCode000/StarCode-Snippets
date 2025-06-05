@@ -61,18 +61,18 @@ export interface ExportDataV2 {
 
 export type ExportData = ExportDataV1 | ExportDataV2
 
-// 云端同步配置接口
+// 云端同步配置接口 (Updated for Git) - 向后兼容接口
 export interface CloudSyncConfig {
-  endpoint: string
-  accessKey: string
-  secretKey: string
-  bucket: string
-  region: string
-  timeout: number // 连接超时时间（秒）
-  addressing: 'path-style' | 'virtual-hosted-style'
-  autoSync: boolean
-  syncInterval: number // 自动同步间隔（秒）
-  concurrency: number // 请求并发数
+  provider: 'github' | 'gitlab' | 'gitee' // Git 平台
+  repositoryUrl: string // 仓库 URL
+  token: string // 访问令牌
+  localPath: string // 本地Git仓库路径
+  defaultBranch: string // 默认分支名
+  authenticationMethod: 'token' | 'ssh' // 认证方式
+  sshKeyPath: string // SSH密钥路径 (当使用SSH认证时)
+  autoSync: boolean // 是否启用自动同步
+  syncInterval: number // 自动同步间隔（分钟）
+  commitMessageTemplate: string // 提交信息模板
 }
 
 // 云端同步状态
@@ -81,4 +81,27 @@ export interface CloudSyncStatus {
   lastSyncTime: number | null
   lastError: string | null
   isSyncing: boolean
+}
+
+// 新增：支持多平台配置存储
+export interface GitPlatformConfig {
+  id: string // 配置唯一标识符
+  provider: 'github' | 'gitlab' | 'gitee' // Git 平台
+  repositoryUrl: string // 仓库 URL
+  token: string // 访问令牌
+  localPath: string // 本地Git仓库路径，可为空使用默认路径
+  defaultBranch: string // 默认分支名
+  authenticationMethod: 'token' | 'ssh' // 认证方式
+  sshKeyPath: string // SSH密钥路径 (当使用SSH认证时)
+  commitMessageTemplate: string // 提交信息模板
+  name: string // 配置名称，用于在UI中显示
+  isActive: boolean // 是否为当前激活的配置
+}
+
+// 更新云端同步配置接口，支持多平台
+export interface MultiPlatformCloudSyncConfig {
+  platforms: GitPlatformConfig[] // 多平台配置列表
+  autoSync: boolean // 是否启用自动同步
+  syncInterval: number // 自动同步间隔（分钟）
+  activeConfigId: string | null // 当前激活的配置ID
 }

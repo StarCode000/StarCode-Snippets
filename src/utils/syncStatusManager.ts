@@ -1,5 +1,4 @@
 import * as vscode from 'vscode'
-import { CloudSyncStatus } from '../types/types'
 
 export interface DetailedSyncStatus {
   isConnected: boolean

@@ -47,9 +47,9 @@ export class V1StorageStrategy implements StorageStrategy {
 
     // 如果没有数据，尝试从旧版本的globalState获取
     if (snippets.length === 0) {
-      console.log('V1StorageStrategy: 从StorageManager获取的代码片段为空，尝试从旧版本globalState获取')
+      // console.log('V1StorageStrategy: 从StorageManager获取的代码片段为空，尝试从旧版本globalState获取')
       const oldSnippets = this.context.globalState.get<CodeSnippetV1[]>('snippets', [])
-      console.log(`V1StorageStrategy: 从旧版本globalState找到 ${oldSnippets.length} 个代码片段`)
+      // console.log(`V1StorageStrategy: 从旧版本globalState找到 ${oldSnippets.length} 个代码片段`)
       return oldSnippets
     }
 
@@ -62,9 +62,9 @@ export class V1StorageStrategy implements StorageStrategy {
 
     // 如果没有数据，尝试从旧版本的globalState获取
     if (directories.length === 0) {
-      console.log('V1StorageStrategy: 从StorageManager获取的目录为空，尝试从旧版本globalState获取')
+      // console.log('V1StorageStrategy: 从StorageManager获取的目录为空，尝试从旧版本globalState获取')
       const oldDirectories = this.context.globalState.get<DirectoryV1[]>('directories', [])
-      console.log(`V1StorageStrategy: 从旧版本globalState找到 ${oldDirectories.length} 个目录`)
+      // console.log(`V1StorageStrategy: 从旧版本globalState找到 ${oldDirectories.length} 个目录`)
       return oldDirectories
     }
 
@@ -196,14 +196,38 @@ export class V2StorageStrategy implements StorageStrategy {
   }
 
   async deleteSnippet(id: string): Promise<void> {
-    // 在V2中，我们需要先找到对应的路径
+    // 在V2中，需要处理多种ID格式：
+    // 1. 基于路径生成的ID
+    // 2. 直接的fullPath
+    // 3. 可能的V1格式ID（兼容性）
     const snippets = await this.getAllSnippets()
-    const index = snippets.findIndex((s) => PathBasedManager.generateIdFromPath(s.fullPath) === id)
+    
+    let index = -1
+    
+    // 首先尝试使用生成的ID匹配
+    index = snippets.findIndex((s) => PathBasedManager.generateIdFromPath(s.fullPath) === id)
+    
+    // 如果没找到，尝试直接用ID作为路径匹配
+    if (index === -1) {
+      index = snippets.findIndex((s) => s.fullPath === id)
+    }
+    
+    // 如果还没找到，尝试作为V1格式的ID（如果数据中还有V1格式的id字段）
+    if (index === -1) {
+      index = snippets.findIndex((s) => (s as any).id === id)
+    }
+
+    // console.log(`V2删除代码片段: 查找ID "${id}", 找到索引: ${index}`)
 
     if (index !== -1) {
+      const deletedSnippet = snippets[index]
+      // console.log(`删除代码片段: ${deletedSnippet.name}, 路径: ${deletedSnippet.fullPath}`)
+      
       snippets.splice(index, 1)
       await this.context.globalState.update(this.snippetsKey, snippets)
       this.snippetsCache = snippets
+    } else {
+      console.warn(`未找到要删除的代码片段: ${id}`)
     }
   }
 
@@ -234,12 +258,34 @@ export class V2StorageStrategy implements StorageStrategy {
   }
 
   async deleteDirectory(id: string): Promise<void> {
-    // 在V2中，我们需要先找到对应的路径
+    // 在V2中，需要处理多种ID格式：
+    // 1. 基于路径生成的ID
+    // 2. 直接的fullPath
+    // 3. 可能的V1格式ID（兼容性）
     const directories = await this.getAllDirectories()
-    const index = directories.findIndex((d) => PathBasedManager.generateIdFromPath(d.fullPath) === id)
+    
+    let index = -1
+    
+    // 首先尝试使用生成的ID匹配
+    index = directories.findIndex((d) => PathBasedManager.generateIdFromPath(d.fullPath) === id)
+    
+    // 如果没找到，尝试直接用ID作为路径匹配
+    if (index === -1) {
+      index = directories.findIndex((d) => d.fullPath === id)
+    }
+    
+    // 如果还没找到，尝试作为V1格式的ID（如果数据中还有V1格式的id字段）
+    if (index === -1) {
+      index = directories.findIndex((d) => (d as any).id === id)
+    }
+
+    // console.log(`V2删除目录: 查找ID "${id}", 找到索引: ${index}`)
 
     if (index !== -1) {
-      const dirPath = directories[index].fullPath
+      const deletedDirectory = directories[index]
+      const dirPath = deletedDirectory.fullPath
+      
+      // console.log(`删除目录: ${deletedDirectory.name}, 路径: ${dirPath}`)
 
       // 删除目录
       directories.splice(index, 1)
@@ -251,9 +297,12 @@ export class V2StorageStrategy implements StorageStrategy {
       const filteredSnippets = snippets.filter((s) => !s.fullPath.startsWith(dirPath))
 
       if (filteredSnippets.length !== snippets.length) {
+        // console.log(`同时删除目录下的 ${snippets.length - filteredSnippets.length} 个代码片段`)
         await this.context.globalState.update(this.snippetsKey, filteredSnippets)
         this.snippetsCache = filteredSnippets
       }
+    } else {
+      console.warn(`未找到要删除的目录: ${id}`)
     }
   }
 
@@ -287,18 +336,20 @@ export class V2StorageStrategy implements StorageStrategy {
  */
 export class StorageStrategyFactory {
   static createStrategy(context: vscode.ExtensionContext, version?: string): StorageStrategy {
-    // 从设置中读取首选版本
+    // 从设置中读取首选版本，与package.json的默认值保持一致
     const settings = vscode.workspace.getConfiguration('starcode-snippets')
-    const preferredVersion = version || settings.get('storageVersion', 'v1')
+    const preferredVersion = version || settings.get('storageVersion', 'v2')
 
     // 检查是否已有V2数据
     const hasV2Data = context.globalState.get('snippets.v2', null) !== null
 
+    // console.log(`存储版本选择: 配置版本=${preferredVersion}, 有V2数据=${hasV2Data}`)
+
     if (preferredVersion === 'v2' || hasV2Data) {
-      console.log('使用V2存储策略（基于路径）')
+      // console.log('使用V2存储策略（基于路径）')
       return new V2StorageStrategy(context)
     } else {
-      console.log('使用V1存储策略（基于ID）')
+      // console.log('使用V1存储策略（基于ID）')
       return new V1StorageStrategy(context)
     }
   }

@@ -113,7 +113,7 @@ export class SnippetEditor {
       () => {
         const disposedSession = this.editingWebviews.get(snippet.id)
         if (disposedSession && disposedSession.isDirtyInWebview) {
-          console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`)
+          // console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`)
           // 自动保存逻辑
           const codeToSave = disposedSession.currentCode // 使用webview同步过来的最新代码
           const languageToSave = this.mapVSCodeLanguageIdToOurs(
@@ -129,10 +129,10 @@ export class SnippetEditor {
             .updateSnippet(updatedSnippet)
             .then(() => {
               this._onDidSaveSnippet.fire(updatedSnippet)
-              console.log(`代码片段 "${updatedSnippet.name}" 已在关闭时自动保存。`)
+              // console.log(`代码片段 "${updatedSnippet.name}" 已在关闭时自动保存。`)
             })
             .catch((error) => {
-              console.error(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败:`, error)
+              // console.error(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败:`, error)
               vscode.window.showErrorMessage(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败。`)
             })
         }
@@ -147,7 +147,7 @@ export class SnippetEditor {
 
     panel.webview.onDidReceiveMessage(
       async (message) => {
-        console.log('收到WebView消息:', message.type, message.snippetId)
+        // console.log('收到WebView消息:', message.type, message.snippetId)
 
         const currentSession = this.editingWebviews.get(message.snippetId || snippet.id)
         if (!currentSession) {
@@ -157,10 +157,10 @@ export class SnippetEditor {
 
         switch (message.type) {
           case 'ready':
-            console.log('收到WebView ready消息，准备发送代码片段数据')
-            console.log('代码片段内容长度:', currentSession.currentCode.length)
+            // console.log('收到WebView ready消息，准备发送代码片段数据')
+            // console.log('代码片段内容长度:', currentSession.currentCode.length)
             if (currentSession.currentCode) {
-              console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50))
+              // console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50))
             }
 
             panel.webview.postMessage({
@@ -171,7 +171,7 @@ export class SnippetEditor {
                 snippetId: currentSession.snippet.id,
               },
             })
-            console.log('已发送loadSnippet消息到WebView')
+            // console.log('已发送loadSnippet消息到WebView')
             break
           case 'saveSnippet': {
             const codeToSave = message.data.code
@@ -212,6 +212,17 @@ export class SnippetEditor {
     )
 
     ContextManager.setEditingSnippet(true)
+  }
+
+  /**
+   * 关闭所有编辑会话
+   */
+  public closeAllSessions(): void {
+    this.editingWebviews.forEach(session => {
+      session.panel.dispose();
+    });
+    this.editingWebviews.clear();
+    ContextManager.setEditingSnippet(false);
   }
 
   private mapLanguageToVSCode(language: string): string {
@@ -260,9 +271,9 @@ export class SnippetEditor {
     const monacoBaseWebViewUri = webview.asWebviewUri(monacoBasePath)
 
     // 日志记录初始代码片段内容是否为空
-    console.log(`初始化WebView，代码片段[${snippet.id}]内容${snippet.code ? '非空' : '为空'}`)
+    // console.log(`初始化WebView，代码片段[${snippet.id}]内容${snippet.code ? '非空' : '为空'}`)
     if (snippet.code) {
-      console.log(`代码片段内容前50个字符: "${snippet.code.substring(0, 50)}..."`)
+      // console.log(`代码片段内容前50个字符: "${snippet.code.substring(0, 50)}..."`)
     }
 
     const nonce = this.getNonce()
@@ -434,7 +445,7 @@ export class SnippetEditor {
           
           // 调试日志函数
           function debugLog(message) {
-            console.log(message);
+            // console.log(message);
             if (debugInfoElement) {
               debugInfoElement.innerHTML += message + '<br>';
               debugInfoElement.scrollTop = debugInfoElement.scrollHeight;
@@ -552,6 +563,22 @@ export class SnippetEditor {
                     
                     const currentPath = possiblePaths[pathIndex];
                     debugLog('尝试路径 ' + (pathIndex + 1) + '/' + possiblePaths.length + ': ' + currentPath);
+                    
+                    // 确保require函数存在
+                    if (typeof require === 'undefined') {
+                      // 如果require未定义，创建一个全局polyfill
+                      debugLog('require未定义，创建polyfill');
+                      window.require = function(modules, callback) {
+                        if (callback) {
+                          // 直接调用回调，模拟已加载monaco
+                          setTimeout(() => callback(), 0);
+                        }
+                      };
+                      window.require.config = function(options) {
+                        debugLog('Mock require.config调用: ' + JSON.stringify(options));
+                        // 这是一个mock函数，不执行任何操作
+                      };
+                    }
                     
                     // 更新配置
                     require.config({ paths: { 'vs': currentPath } });
