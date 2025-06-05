@@ -533,8 +533,32 @@ export class SettingsWebviewProvider {
       const isUsingDefaultPath = SettingsManager.isUsingDefaultPath()
       const defaultLocalPath = PathUtils.getDefaultLocalRepoPath()
       
+      // 获取所有平台的实际解析路径
+      const platformPaths: { [provider: string]: string } = {}
+      if (multiConfig.platforms) {
+        multiConfig.platforms.forEach(platform => {
+          const resolvedPath = PathUtils.resolveDefaultPathToken(platform.localPath || '', platform.provider)
+          platformPaths[platform.provider] = resolvedPath
+        })
+      }
+      
+      // 如果有激活平台，也添加其路径
+      if (activePlatform) {
+        const resolvedPath = PathUtils.resolveDefaultPathToken(activePlatform.localPath || '', activePlatform.provider)
+        platformPaths[activePlatform.provider] = resolvedPath
+      }
+      
       // 检查多平台路径冲突
       const pathConflicts = PathUtils.checkPathConflicts(multiConfig.platforms)
+      
+      // 检查是否有配置在读取时被自动调整了路径
+      const hasAutoAdjustedPaths = multiConfig.platforms.some(platform => 
+        platform.localPath && (
+          platform.localPath === 'GITHUB_DEFAULT_REPO' || 
+          platform.localPath === 'GITLAB_DEFAULT_REPO' || 
+          platform.localPath === 'GITEE_DEFAULT_REPO'
+        )
+      )
       
       // 发送所有配置数据到WebView
     panel.webview.postMessage({
@@ -546,7 +570,9 @@ export class SettingsWebviewProvider {
         localPathDescription: localPathDescription,
         isUsingDefaultPath: isUsingDefaultPath,
         defaultLocalPath: defaultLocalPath,
-        pathConflicts: pathConflicts
+        pathConflicts: pathConflicts,
+        hasAutoAdjustedPaths: hasAutoAdjustedPaths,
+        platformPaths: platformPaths // 添加解析后的实际路径
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载配置时发生错误'
@@ -902,6 +928,9 @@ export class SettingsWebviewProvider {
       let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`
       let importedPlatformsCount = 0
       let hasCredentials = false
+      
+      // 声明路径处理结果变量，以便在不同作用域中使用
+      let pathProcessingResults: Array<{ platform: string; wasModified: boolean; reason?: string }> = []
 
       // 根据版本号处理不同格式的配置文件
       const version = parseFloat(importData.version)
@@ -928,11 +957,22 @@ export class SettingsWebviewProvider {
             
             for (const platform of multiConfig.platforms) {
               if (platform.provider && ['github', 'gitlab', 'gitee'].includes(platform.provider)) {
+                // 智能处理导入的路径，检查跨平台兼容性
+                const pathResult = PathUtils.processImportedPath(platform.localPath, platform.provider)
+                
+                if (pathResult.wasModified) {
+                  pathProcessingResults.push({
+                    platform: platform.provider,
+                    wasModified: true,
+                    reason: pathResult.reason
+                  })
+                }
+
                 platformConfigs[platform.provider] = {
                   provider: platform.provider,
                   repositoryUrl: platform.repositoryUrl || '',
                   token: platform.token || '',
-                  localPath: platform.localPath || '',
+                  localPath: pathResult.processedPath,
                   defaultBranch: platform.defaultBranch || 'main',
                   authenticationMethod: platform.authenticationMethod || 'token',
                   sshKeyPath: platform.sshKeyPath || '',
@@ -941,6 +981,19 @@ export class SettingsWebviewProvider {
                   syncInterval: multiConfig.syncInterval || 15,
                 }
               }
+            }
+
+            // 如果有路径被修改，通知用户
+            if (pathProcessingResults.length > 0) {
+              const modifiedPlatforms = pathProcessingResults.map(result => {
+                const platformName = result.platform.charAt(0).toUpperCase() + result.platform.slice(1)
+                return `${platformName}: ${result.reason}`
+              }).join('\n')
+              
+              vscode.window.showWarningMessage(
+                `跨平台兼容性检查：部分平台的本地路径已调整为默认路径\n\n${modifiedPlatforms}`,
+                '我知道了'
+              )
             }
 
             // 批量保存平台配置
@@ -978,6 +1031,10 @@ export class SettingsWebviewProvider {
             importMessage += '（包含访问凭据）'
             notificationMessage += '，包含访问凭据'
           }
+
+          if (pathProcessingResults.length > 0) {
+            notificationMessage += `\n\n🔄 已自动调整 ${pathProcessingResults.length} 个平台的本地路径以兼容当前操作系统`
+          }
         }
 
       } else if (version >= 2.0) {
@@ -995,18 +1052,35 @@ export class SettingsWebviewProvider {
         } else if (isGitConfig) {
           hasCredentials = !!(configData.token || configData.sshKeyPath)
           
+          // 智能处理导入的路径，检查跨平台兼容性
+          const pathResult = PathUtils.processImportedPath(
+            configData.localPath,
+            configData.provider as 'github' | 'gitlab' | 'gitee'
+          )
+          
           const currentConfig = SettingsManager.getCloudSyncConfig()
           const newConfig = {
             provider: configData.provider || currentConfig.provider || '',
             repositoryUrl: configData.repositoryUrl || currentConfig.repositoryUrl || '',
             token: configData.token || currentConfig.token || '',
-            localPath: configData.localPath || currentConfig.localPath || '',
+            localPath: pathResult.processedPath || currentConfig.localPath || '',
             defaultBranch: configData.defaultBranch || currentConfig.defaultBranch || 'main',
             authenticationMethod: configData.authenticationMethod || currentConfig.authenticationMethod || 'token',
             sshKeyPath: configData.sshKeyPath || currentConfig.sshKeyPath || '',
             autoSync: configData.autoSync !== undefined ? configData.autoSync : currentConfig.autoSync || false,
             syncInterval: configData.syncInterval || currentConfig.syncInterval || 15,
             commitMessageTemplate: configData.commitMessageTemplate || currentConfig.commitMessageTemplate || 'Sync snippets: {timestamp}',
+          }
+
+          // 如果路径被修改，通知用户
+          if (pathResult.wasModified) {
+            const platformName = configData.provider ? 
+              configData.provider.charAt(0).toUpperCase() + configData.provider.slice(1) : 
+              '当前平台'
+            vscode.window.showWarningMessage(
+              `跨平台兼容性检查：${platformName} 的本地路径已调整为默认路径\n\n原因：${pathResult.reason}`,
+              '我知道了'
+            )
           }
 
           // 验证配置
@@ -1026,6 +1100,10 @@ export class SettingsWebviewProvider {
           } else {
             importMessage += '（未包含访问凭据，已保留当前设置）'
             notificationMessage += '\n\n⚠️ 导入的配置不包含访问凭据，已保留当前设置的凭据信息'
+          }
+
+          if (pathResult.wasModified) {
+            notificationMessage += '\n\n🔄 已自动调整本地路径以兼容当前操作系统'
           }
         } else {
           throw new Error('配置文件格式无法识别。请确保导入正确的配置文件。')
@@ -1440,9 +1518,12 @@ export class SettingsWebviewProvider {
 
             <div class="form-group">
                 <label for="localPath">本地仓库路径 (可选)</label>
-                <input type="text" id="localPath" placeholder="留空使用默认路径">
+                <input type="text" id="localPath" placeholder="留空表示使用默认路径">
                 <div class="help-text" id="localPathHelp">
-                    <div>如果留空，将使用系统默认路径</div>
+                    <div>💡 智能路径管理：</div>
+                    <div>• 勾选"使用平台默认路径标识符"可确保配置在不同系统间同步时自动适配</div>
+                    <div>• 手动输入路径时，如检测到跨平台不兼容会自动调整为标识符</div>
+                    <div>• 支持的标识符：GITHUB_DEFAULT_REPO、GITLAB_DEFAULT_REPO、GITEE_DEFAULT_REPO</div>
                     <div id="defaultPathInfo" class="default-path-info"></div>
                 </div>
                 <div class="checkbox-group">
@@ -1617,6 +1698,7 @@ export class SettingsWebviewProvider {
         var defaultLocalPath = '';
         var multiPlatformConfig = null;
         var activePlatformConfig = null;
+        var platformPaths = {}; // 存储后端解析的实际路径
 
         // 转义HTML特殊字符
         function escapeHTML(str) {
@@ -1637,13 +1719,67 @@ export class SettingsWebviewProvider {
 
         // 使用默认路径复选框切换
         useDefaultPathCheckbox.addEventListener('change', () => {
+            updateLocalPathDisplay();
+        });
+
+        // 更新本地路径显示状态
+        function updateLocalPathDisplay() {
+            const provider = providerSelect.value;
+            
             if (useDefaultPathCheckbox.checked) {
-                localPathInput.value = '';
-                localPathInput.placeholder = '将使用默认路径';
+                // 勾选使用默认路径：显示实际路径（只读），但数据存储为标识符
+                // 优先使用后端解析的实际路径，如果没有则使用前端模拟的路径
+                const actualPath = platformPaths[provider] || getPlatformDefaultPath(provider);
+                
+                localPathInput.value = actualPath;
+                localPathInput.placeholder = '使用平台默认路径（只读）';
                 localPathInput.disabled = true;
+                localPathInput.style.fontStyle = 'italic';
+                localPathInput.style.color = 'var(--vscode-descriptionForeground)';
+                
+                // 只有在没有已存在的 data-token 时才设置新的
+                // 这样可以避免覆盖从 setFormData 设置的正确标识符
+                if (!localPathInput.getAttribute('data-token')) {
+                    const defaultPathToken = getDefaultPathTokenForProvider(provider);
+                    localPathInput.setAttribute('data-token', defaultPathToken);
+                }
             } else {
+                // 未勾选：可编辑状态
                 localPathInput.disabled = false;
-                localPathInput.placeholder = '留空使用默认路径';
+                localPathInput.placeholder = '留空或输入自定义路径';
+                localPathInput.style.fontStyle = 'normal';
+                localPathInput.style.color = 'var(--vscode-input-foreground)';
+                localPathInput.removeAttribute('data-token');
+                
+                // 如果当前值是后端解析的实际路径，清空输入框
+                const actualPath = platformPaths[provider] || getPlatformDefaultPath(provider);
+                if (localPathInput.value === actualPath) {
+                    localPathInput.value = '';
+                }
+            }
+        }
+
+        // 获取平台对应的默认路径标识符
+        function getDefaultPathTokenForProvider(provider) {
+            switch (provider) {
+                case 'github':
+                    return 'GITHUB_DEFAULT_REPO';
+                case 'gitlab':
+                    return 'GITLAB_DEFAULT_REPO';
+                case 'gitee':
+                    return 'GITEE_DEFAULT_REPO';
+                default:
+                    return '';
+            }
+        }
+
+        // 平台选择变化
+        providerSelect.addEventListener('change', () => {
+            // 如果当前勾选了使用默认路径，更新显示和data-token
+            if (useDefaultPathCheckbox.checked) {
+                // 清除旧的 data-token，让 updateLocalPathDisplay 设置新的
+                localPathInput.removeAttribute('data-token');
+                updateLocalPathDisplay();
             }
         });
 
@@ -1742,8 +1878,14 @@ export class SettingsWebviewProvider {
 
         // 获取表单数据
         function getFormData() {
-            // 如果勾选了使用默认路径，或者路径为空，则不传递localPath
-            const localPathValue = useDefaultPathCheckbox.checked ? '' : localPathInput.value.trim();
+            // 如果勾选了使用默认路径，保存默认路径标识符；否则保存用户输入的路径
+            let localPathValue;
+            if (useDefaultPathCheckbox.checked) {
+                // 从data-token属性获取标识符，如果没有则使用旧逻辑
+                localPathValue = localPathInput.getAttribute('data-token') || getDefaultPathTokenForProvider(providerSelect.value);
+            } else {
+                localPathValue = localPathInput.value.trim();
+            }
             
             return {
                 provider: providerSelect.value,
@@ -1765,17 +1907,29 @@ export class SettingsWebviewProvider {
             repositoryUrlInput.value = config.repositoryUrl || '';
             
             // 处理本地路径逻辑
-            const isUsingDefault = !config.localPath || config.localPath.trim() === '' || config.isUsingDefaultPath;
+            const localPath = config.localPath || '';
+            const isDefaultPathToken = localPath === 'GITHUB_DEFAULT_REPO' || 
+                                     localPath === 'GITLAB_DEFAULT_REPO' || 
+                                     localPath === 'GITEE_DEFAULT_REPO' || 
+                                     localPath === 'DEFAULT_REPO';
+            const isUsingDefault = !localPath || localPath.trim() === '' || isDefaultPathToken || config.isUsingDefaultPath;
+            
             if (isUsingDefault) {
-                localPathInput.value = '';
                 useDefaultPathCheckbox.checked = true;
-                localPathInput.disabled = true;
-                localPathInput.placeholder = '将使用默认路径';
+                if (isDefaultPathToken) {
+                    // 存储标识符到data属性
+                    localPathInput.setAttribute('data-token', localPath);
+                }
+                // 更新显示状态（会显示实际路径并设为只读）
+                updateLocalPathDisplay();
             } else {
-                localPathInput.value = config.localPath;
+                localPathInput.value = localPath;
                 useDefaultPathCheckbox.checked = false;
                 localPathInput.disabled = false;
-                localPathInput.placeholder = '留空使用默认路径';
+                localPathInput.placeholder = '留空或输入自定义路径';
+                localPathInput.style.fontStyle = 'normal';
+                localPathInput.style.color = 'var(--vscode-input-foreground)';
+                localPathInput.removeAttribute('data-token');
             }
             
             // 更新默认路径信息显示
@@ -1802,6 +1956,12 @@ export class SettingsWebviewProvider {
                 if (currentPlatform && ['github', 'gitlab', 'gitee'].includes(currentPlatform)) {
                     const currentFormData = getFormData();
                     currentFormData.provider = currentPlatform;
+                    
+                    // 修复路径标识符问题：如果使用默认路径，确保使用当前平台对应的标识符
+                    if (useDefaultPathCheckbox.checked) {
+                        currentFormData.localPath = getDefaultPathTokenForProvider(currentPlatform);
+                    }
+                    
                     platformConfigs[currentPlatform] = currentFormData;
                     // console.log('保存前先更新缓存:', getPlatformName(currentPlatform));
                 }
@@ -1818,6 +1978,10 @@ export class SettingsWebviewProvider {
                 
                 // 添加当前表单配置
                 if (currentConfig.provider && currentConfig.repositoryUrl?.trim()) {
+                    // 再次确保当前配置的路径标识符正确
+                    if (useDefaultPathCheckbox.checked) {
+                        currentConfig.localPath = getDefaultPathTokenForProvider(currentConfig.provider);
+                    }
                     allConfigs[currentConfig.provider] = currentConfig;
                     configCount++;
                     // console.log('准备保存当前配置:', getPlatformName(currentConfig.provider));
@@ -1917,6 +2081,12 @@ export class SettingsWebviewProvider {
                 const currentFormData = getFormData();
                 // 确保保存的配置包含正确的provider
                 currentFormData.provider = currentPlatform;
+                
+                // 修复路径标识符问题：如果使用默认路径，确保使用当前平台对应的标识符
+                if (useDefaultPathCheckbox.checked) {
+                    currentFormData.localPath = getDefaultPathTokenForProvider(currentPlatform);
+                }
+                
                 platformConfigs[currentPlatform] = currentFormData;
                 // console.log('已保存', getPlatformName(currentPlatform), '配置到缓存');
             }
@@ -1966,15 +2136,21 @@ export class SettingsWebviewProvider {
             }
         }
 
-        // 获取平台特定的默认路径
+        // 获取平台特定的默认路径（后备方案，优先使用后端提供的真实路径）
         function getPlatformDefaultPath(platform) {
+            // 如果后端已提供解析后的路径，优先使用
+            if (platformPaths[platform]) {
+                return platformPaths[platform];
+            }
+            
+            // 后备方案：前端模拟（显示未解析的路径格式）
             const isWindows = navigator.platform.indexOf('Win') > -1;
             const isMac = navigator.platform.indexOf('Mac') > -1;
             
             const platformName = getPlatformName(platform);
             
             if (isWindows) {
-                return \`%USERPROFILE%\\Documents\\StarCode-Snippets\\\${platformName}\`;
+                return \`%USERPROFILE%\\\\Documents\\\\StarCode-Snippets\\\\\${platformName}\`;
             } else if (isMac) {
                 return \`~/Documents/StarCode-Snippets/\${platformName}\`;
             } else {
@@ -2059,6 +2235,7 @@ export class SettingsWebviewProvider {
                     // 更新多平台配置数据
                     multiPlatformConfig = message.multiConfig;
                     activePlatformConfig = message.activePlatform;
+                    platformPaths = message.platformPaths || {}; // 保存后端解析的实际路径
                     
                     // 缓存多平台配置
                     if (message.multiConfig && message.multiConfig.platforms) {
@@ -2201,6 +2378,11 @@ export class SettingsWebviewProvider {
                         // 更新所有平台的缓存
                         if (message.savedCount > 0) {
                             // console.log('批量保存成功，已保存 ' + message.savedCount + ' 个平台配置');
+                            
+                            // 重新请求配置以确保显示正确的状态
+                            setTimeout(() => {
+                                vscode.postMessage({ type: 'loadConfig' });
+                            }, 300);
                         }
                     } else {
                         // 检查是否是权限错误

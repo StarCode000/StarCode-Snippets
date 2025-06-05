@@ -6,6 +6,13 @@ import * as path from 'path'
  * 负责处理不同操作系统下的默认路径逻辑
  */
 export class PathUtils {
+  // 默认路径的特殊标识符
+  public static readonly DEFAULT_PATH_TOKENS = {
+    GITHUB_DEFAULT_REPO: 'GITHUB_DEFAULT_REPO',
+    GITLAB_DEFAULT_REPO: 'GITLAB_DEFAULT_REPO',
+    GITEE_DEFAULT_REPO: 'GITEE_DEFAULT_REPO',
+    GENERIC_DEFAULT_REPO: 'DEFAULT_REPO'
+  } as const
   /**
    * 获取默认的本地仓库路径（通用版本，不建议直接使用）
    * 根据不同操作系统返回合适的默认路径
@@ -192,7 +199,13 @@ export class PathUtils {
       if (!effectivePath) {
         effectivePath = this.getDefaultLocalRepoPathForPlatform(platform.provider)
       } else {
-        effectivePath = this.normalizePath(effectivePath)
+        // 如果是默认路径标识符，解析为实际路径
+        if (this.isDefaultPathToken(effectivePath)) {
+          effectivePath = this.resolveDefaultPathToken(effectivePath, platform.provider)
+        } else {
+          // 普通路径进行规范化处理
+          effectivePath = this.normalizePath(effectivePath)
+        }
       }
 
       const normalizedPath = path.resolve(effectivePath)
@@ -287,6 +300,185 @@ export class PathUtils {
         isValid: false,
         error: `路径验证失败: ${error instanceof Error ? error.message : '未知错误'}`
       }
+    }
+  }
+
+  /**
+   * 检查路径是否适用于当前平台
+   * 用于验证导入的配置路径是否与当前操作系统兼容
+   */
+  static isPathCompatibleWithCurrentPlatform(inputPath: string): {
+    isCompatible: boolean;
+    reason?: string;
+    suggestedPath?: string;
+  } {
+    if (!inputPath || inputPath.trim() === '') {
+      return { isCompatible: true } // 空路径总是兼容的，会使用默认路径
+    }
+
+    const currentPlatform = os.platform()
+    
+    // 检查是否包含平台特定的路径分隔符或模式
+    const isWindowsPath = /^[A-Za-z]:|\\/.test(inputPath) || inputPath.includes('%') || inputPath.includes('\\')
+    const isUnixPath = inputPath.startsWith('/') || inputPath.startsWith('~') || inputPath.includes('$')
+    
+    switch (currentPlatform) {
+      case 'win32':
+        if (isUnixPath && !isWindowsPath) {
+          return {
+            isCompatible: false,
+            reason: '检测到Unix/Linux格式路径，当前系统为Windows',
+            suggestedPath: this.getDefaultLocalRepoPath()
+          }
+        }
+        break
+        
+      case 'darwin':
+      case 'linux':
+        if (isWindowsPath && !isUnixPath) {
+          return {
+            isCompatible: false,
+            reason: '检测到Windows格式路径，当前系统为Unix/Linux',
+            suggestedPath: this.getDefaultLocalRepoPath()
+          }
+        }
+        break
+    }
+
+    // 尝试解析路径，如果失败则不兼容
+    try {
+      this.normalizePath(inputPath)
+      return { isCompatible: true }
+    } catch (error) {
+      return {
+        isCompatible: false,
+        reason: `路径格式无效: ${error instanceof Error ? error.message : '未知错误'}`,
+        suggestedPath: this.getDefaultLocalRepoPath()
+      }
+    }
+  }
+
+  /**
+   * 获取平台对应的默认路径标识符
+   */
+  static getDefaultPathToken(gitPlatform: 'github' | 'gitlab' | 'gitee'): string {
+    switch (gitPlatform) {
+      case 'github':
+        return this.DEFAULT_PATH_TOKENS.GITHUB_DEFAULT_REPO
+      case 'gitlab':
+        return this.DEFAULT_PATH_TOKENS.GITLAB_DEFAULT_REPO
+      case 'gitee':
+        return this.DEFAULT_PATH_TOKENS.GITEE_DEFAULT_REPO
+    }
+  }
+
+  /**
+   * 检查路径是否为默认路径标识符
+   */
+  static isDefaultPathToken(path: string): boolean {
+    const tokens = Object.values(this.DEFAULT_PATH_TOKENS)
+    return tokens.includes(path as any)
+  }
+
+  /**
+   * 将默认路径标识符解析为实际路径
+   */
+  static resolveDefaultPathToken(pathOrToken: string, gitPlatform?: 'github' | 'gitlab' | 'gitee'): string {
+    if (!pathOrToken || pathOrToken.trim() === '') {
+      // 空路径，使用平台特定默认路径或通用默认路径
+      return gitPlatform 
+        ? this.getDefaultLocalRepoPathForPlatform(gitPlatform)
+        : this.getDefaultLocalRepoPath()
+    }
+
+    // 检查是否为默认路径标识符
+    switch (pathOrToken) {
+      case this.DEFAULT_PATH_TOKENS.GITHUB_DEFAULT_REPO:
+        return this.getDefaultLocalRepoPathForPlatform('github')
+      case this.DEFAULT_PATH_TOKENS.GITLAB_DEFAULT_REPO:
+        return this.getDefaultLocalRepoPathForPlatform('gitlab')
+      case this.DEFAULT_PATH_TOKENS.GITEE_DEFAULT_REPO:
+        return this.getDefaultLocalRepoPathForPlatform('gitee')
+      case this.DEFAULT_PATH_TOKENS.GENERIC_DEFAULT_REPO:
+        return this.getDefaultLocalRepoPath()
+      default:
+        // 不是默认路径标识符，直接返回原路径
+        // 避免使用 normalizePath，因为其中的 path.resolve 会受当前工作目录影响
+        return pathOrToken
+    }
+  }
+
+  /**
+   * 智能处理导入的路径配置
+   * 自动检测和修复跨平台路径兼容性问题
+   */
+  static processImportedPath(
+    importedPath: string, 
+    gitPlatform?: 'github' | 'gitlab' | 'gitee'
+  ): {
+    processedPath: string;
+    wasModified: boolean;
+    reason?: string;
+  } {
+    if (!importedPath || importedPath.trim() === '') {
+      return {
+        processedPath: '',
+        wasModified: false
+      }
+    }
+
+    // 如果是默认路径标识符，直接返回对应的标识符
+    if (this.isDefaultPathToken(importedPath)) {
+      return {
+        processedPath: importedPath,
+        wasModified: false
+      }
+    }
+
+    const compatibilityCheck = this.isPathCompatibleWithCurrentPlatform(importedPath)
+    
+    if (compatibilityCheck.isCompatible) {
+      return {
+        processedPath: importedPath,
+        wasModified: false
+      }
+    }
+
+    // 路径不兼容，使用平台特定的默认路径标识符
+    const defaultToken = gitPlatform 
+      ? this.getDefaultPathToken(gitPlatform)
+      : this.DEFAULT_PATH_TOKENS.GENERIC_DEFAULT_REPO
+
+    return {
+      processedPath: defaultToken,
+      wasModified: true,
+      reason: compatibilityCheck.reason
+    }
+  }
+
+  /**
+   * 检查配置的路径是否使用默认路径
+   * 支持检查默认路径标识符和空路径
+   */
+  static isUsingDefaultPath(configuredPath: string, gitPlatform?: 'github' | 'gitlab' | 'gitee'): boolean {
+    if (!configuredPath || configuredPath.trim() === '') {
+      return true
+    }
+
+    // 检查是否为默认路径标识符
+    if (this.isDefaultPathToken(configuredPath)) {
+      return true
+    }
+
+    // 检查是否与当前平台的默认路径一致
+    const actualDefaultPath = gitPlatform 
+      ? this.getDefaultLocalRepoPathForPlatform(gitPlatform)
+      : this.getDefaultLocalRepoPath()
+    
+    try {
+      return path.resolve(configuredPath) === path.resolve(actualDefaultPath)
+    } catch (error) {
+      return false
     }
   }
 } 
