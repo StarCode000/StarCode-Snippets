@@ -248,10 +248,10 @@ export class SnippetEditor {
   private mapVSCodeLanguageIdToOurs(vscodeLangId: string, originalLanguage?: string): string {
     if (originalLanguage) {
       const lowerOriginal = originalLanguage.toLowerCase()
-      if (vscodeLangId === 'html' && lowerOriginal === 'vue') return 'vue'
-      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') return 'shell'
+      if (vscodeLangId === 'html' && lowerOriginal === 'vue') {return 'vue'}
+      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') {return 'shell'}
     }
-    if (vscodeLangId === 'shellscript') return 'shell'
+    if (vscodeLangId === 'shellscript') {return 'shell'}
     return vscodeLangId
   }
 

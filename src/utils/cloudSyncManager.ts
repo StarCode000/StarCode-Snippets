@@ -861,16 +861,37 @@ export class CloudSyncManager {
       fs.mkdirSync(effectiveLocalPath, { recursive: true })
     }
 
-    // 写入代码片段数据
+    // 准备新的文件内容
+    const newSnippetsContent = JSON.stringify(snippets, null, 2)
+    const newDirectoriesContent = JSON.stringify(directories, null, 2)
+
     const snippetsFile = path.join(effectiveLocalPath, 'snippets.json')
-    fs.writeFileSync(snippetsFile, JSON.stringify(snippets, null, 2), 'utf8')
-
-    // 写入目录数据
     const directoriesFile = path.join(effectiveLocalPath, 'directories.json')
-    fs.writeFileSync(directoriesFile, JSON.stringify(directories, null, 2), 'utf8')
-
-    // 写入或更新元数据文件
     const metadataFile = path.join(effectiveLocalPath, '.starcode-meta.json')
+
+    // 检查代码片段文件是否需要更新
+    let needUpdateSnippets = true
+    if (fs.existsSync(snippetsFile)) {
+      try {
+        const existingSnippetsContent = fs.readFileSync(snippetsFile, 'utf8')
+        needUpdateSnippets = existingSnippetsContent !== newSnippetsContent
+      } catch (error) {
+        needUpdateSnippets = true
+      }
+    }
+
+    // 检查目录文件是否需要更新
+    let needUpdateDirectories = true
+    if (fs.existsSync(directoriesFile)) {
+      try {
+        const existingDirectoriesContent = fs.readFileSync(directoriesFile, 'utf8')
+        needUpdateDirectories = existingDirectoriesContent !== newDirectoriesContent
+      } catch (error) {
+        needUpdateDirectories = true
+      }
+    }
+
+    // 准备元数据
     let metadata: any = {
       version: '2.0.0',
       totalSnippets: snippets.length,
@@ -878,7 +899,7 @@ export class CloudSyncManager {
       syncMethod: 'git'
     }
 
-    // 只有在需要更新时间戳时才更新，否则保持原有时间戳
+    // 处理时间戳
     if (updateTimestamp) {
       metadata.lastSync = new Date().toISOString()
     } else {
@@ -895,9 +916,38 @@ export class CloudSyncManager {
       }
     }
 
-    fs.writeFileSync(metadataFile, JSON.stringify(metadata, null, 2), 'utf8')
+    // 检查元数据文件是否需要更新
+    const newMetadataContent = JSON.stringify(metadata, null, 2)
+    let needUpdateMetadata = true
+    if (fs.existsSync(metadataFile)) {
+      try {
+        const existingMetadataContent = fs.readFileSync(metadataFile, 'utf8')
+        needUpdateMetadata = existingMetadataContent !== newMetadataContent
+      } catch (error) {
+        needUpdateMetadata = true
+      }
+    }
 
-    // console.log(`已写入 ${snippets.length} 个代码片段和 ${directories.length} 个目录到Git仓库`)
+    // 只有在内容真正发生变化时才写入文件
+    if (needUpdateSnippets) {
+      fs.writeFileSync(snippetsFile, newSnippetsContent, 'utf8')
+      // console.log(`更新了代码片段文件: ${snippets.length} 个片段`)
+    }
+
+    if (needUpdateDirectories) {
+      fs.writeFileSync(directoriesFile, newDirectoriesContent, 'utf8')
+      // console.log(`更新了目录文件: ${directories.length} 个目录`)
+    }
+
+    if (needUpdateMetadata) {
+      fs.writeFileSync(metadataFile, newMetadataContent, 'utf8')
+      // console.log(`更新了元数据文件`)
+    }
+
+    // 如果没有任何文件需要更新，记录日志
+    if (!needUpdateSnippets && !needUpdateDirectories && !needUpdateMetadata) {
+      // console.log('所有文件内容均无变化，跳过写入操作')
+    }
   }
 
   /**
@@ -1224,8 +1274,10 @@ export class CloudSyncManager {
       // 如果没有任何文件且有数据要同步，强制写入数据（兼容空仓库情况）
       if (gitStatus.files.length === 0 && (currentSnippets.length > 0 || currentDirectories.length > 0)) {
         // console.log('检测到空仓库但有数据要同步，强制写入数据...')
-        // 对于空仓库的首次同步，更新时间戳
-        await this.writeDataToGitRepo(currentSnippets, currentDirectories, true)
+        // 重新检查本地变更，以确定是否真的需要更新时间戳
+        const emptyRepoChanges = await this.detectLocalChanges(currentSnippets, currentDirectories)
+        const shouldUpdateTimestamp = emptyRepoChanges.hasChanges && emptyRepoChanges.type !== 'none'
+        await this.writeDataToGitRepo(currentSnippets, currentDirectories, shouldUpdateTimestamp)
         
         // 重新检查状态
         const newGitStatus = await this.gitStatus()
