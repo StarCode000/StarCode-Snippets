@@ -75,11 +75,12 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
 
     // 监听搜索变化
     this._searchManager.onDidChangeSearch(() => {
-      this.refresh()
+      // 搜索变化时只需要刷新，不需要重新加载数据
+      this._onDidChangeTreeData.fire()
     })
 
-    // 启动状态更新定时器（每5秒更新一次）
-    this._startStatusUpdateTimer() // 暂时禁用定时器避免干扰调试
+    // 启动状态更新定时器（每30秒更新一次）
+    this._startStatusUpdateTimer()
 
     // 立即加载数据
     this._loadData()
@@ -393,8 +394,8 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     }
 
     // 应用搜索过滤
-    const filteredSnippets = this._searchManager.filterSnippets(this._snippets as any)
-    const filteredDirectories = this._searchManager.filterDirectories(this._directories as any, filteredSnippets as any)
+    const filteredSnippets = this._searchManager.filterSnippets(this._snippets)
+    const filteredDirectories = this._searchManager.filterDirectories(this._directories, filteredSnippets)
 
     if (!element) {
       // 根节点 - 显示所有顶级目录和代码片段
@@ -490,7 +491,19 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       }
 
       // 获取根级别的目录和代码片段
-      const { childDirs: rootDirs, childSnippets: rootSnippets } = this.getChildrenForDirectory(undefined, '/', filteredSnippets, filteredDirectories)
+      let rootDirs: (Directory | DirectoryV2)[] = []
+      let rootSnippets: (CodeSnippet | CodeSnippetV2)[] = []
+
+      if (this._searchManager.isActive) {
+        // 搜索模式：显示所有匹配的代码片段，不按目录层级过滤
+        rootSnippets = filteredSnippets
+        rootDirs = filteredDirectories
+      } else {
+        // 正常模式：只显示根级别的目录和代码片段
+        const children = this.getChildrenForDirectory(undefined, '/', filteredSnippets, filteredDirectories)
+        rootDirs = children.childDirs
+        rootSnippets = children.childSnippets
+      }
 
       // 添加根级别的目录
       rootDirs

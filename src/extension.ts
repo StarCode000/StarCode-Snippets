@@ -983,6 +983,138 @@ function registerCommands(
     }
   )
 
+  // 创建代码片段命令（根级别）
+  const createSnippet = vscode.commands.registerCommand(
+    'starcode-snippets.createSnippet',
+    async () => {
+      const name = await vscode.window.showInputBox({
+        prompt: '输入代码片段名称',
+        placeHolder: '新建代码片段',
+      })
+
+      if (name) {
+        // 1. 验证文件系统安全性
+        const nameValidation = validateFileSystemSafety(name)
+        if (!nameValidation.isValid) {
+          vscode.window.showErrorMessage(`代码片段名称无效: ${nameValidation.error}`)
+          return
+        }
+
+        const storageVersion = storageContext.getCurrentStorageVersion()
+        
+        // 2. 检查是否与目录名称冲突
+        const directories = await storageManager.getAllDirectories()
+        const parentPath = storageVersion === 'v2' ? '/' : null
+        const hasDirectoryConflict = checkSnippetDirectoryConflict(name, directories, parentPath, storageVersion)
+        if (hasDirectoryConflict) {
+          vscode.window.showErrorMessage(`不能创建代码片段 "${name}"，因为已存在同名目录`)
+          return
+        }
+        
+        // 3. 检查代码片段重名（在根级别）
+        const isDuplicate = await checkDuplicateSnippetName(name, null)
+        if (isDuplicate) {
+          vscode.window.showErrorMessage(`根目录中已存在名为 "${name}" 的代码片段`)
+          return
+        }
+
+        const languageOptions = [
+          { label: '纯文本', value: 'plaintext' },
+          { label: 'TypeScript', value: 'typescript' },
+          { label: 'JavaScript', value: 'javascript' },
+          { label: 'HTML', value: 'html' },
+          { label: 'CSS', value: 'css' },
+          { label: 'JSON', value: 'json' },
+          { label: 'Vue', value: 'vue' },
+          { label: 'Python', value: 'python' },
+          { label: 'Java', value: 'java' },
+          { label: 'C#', value: 'csharp' },
+          { label: 'C++', value: 'cpp' },
+          { label: 'Go', value: 'go' },
+          { label: 'PHP', value: 'php' },
+          { label: 'Ruby', value: 'ruby' },
+          { label: 'Rust', value: 'rust' },
+          { label: 'SQL', value: 'sql' },
+          { label: 'Markdown', value: 'markdown' },
+          { label: 'YAML', value: 'yaml' },
+          { label: 'Shell', value: 'shell' },
+        ]
+
+        const selectedLanguage = await vscode.window.showQuickPick(languageOptions, {
+          placeHolder: '选择代码语言',
+        })
+
+        if (!selectedLanguage) {
+          return
+        }
+
+        const extMap: { [key: string]: string } = {
+          typescript: '.ts',
+          javascript: '.js',
+          html: '.html',
+          css: '.css',
+          json: '.json',
+          vue: '.vue',
+          python: '.py',
+          java: '.java',
+          csharp: '.cs',
+          cpp: '.cpp',
+          go: '.go',
+          php: '.php',
+          ruby: '.rb',
+          rust: '.rs',
+          sql: '.sql',
+          markdown: '.md',
+          yaml: '.yml',
+          shell: '.sh',
+        }
+        const fileName = 'snippet' + (extMap[selectedLanguage.value] || '.txt')
+
+        const version = storageContext.getCurrentStorageVersion()
+        let snippet: any
+        
+        if (version === 'v2') {
+          // V2格式：在根目录创建
+          snippet = {
+            name,
+            code: '',
+            fileName: fileName,
+            filePath: '',
+            category: '根目录',
+            fullPath: `/${name}`,
+            order: 0,
+            createTime: Date.now(),
+            language: selectedLanguage.value,
+          }
+        } else {
+          // V1格式：在根目录创建（parentId为null）
+          snippet = {
+            id: uuidv4(),
+            name,
+            code: '',
+            fileName: fileName,
+            filePath: '',
+            category: '根目录',
+            parentId: null,
+            order: 0,
+            createTime: Date.now(),
+            language: selectedLanguage.value,
+          }
+        }
+
+        await storageManager.saveSnippet(snippet)
+        refreshTreeView()
+
+        try {
+          await SnippetEditor.getInstance().edit(snippet)
+        } catch (error) {
+          console.error('编辑代码片段失败:', error)
+          vscode.window.showErrorMessage(`编辑代码片段失败: ${error}`)
+        }
+      }
+    }
+  )
+
   // 删除命令
   const deleteItem = vscode.commands.registerCommand('starcode-snippets.delete', async (item: any) => {
     if (!item) {
@@ -1195,6 +1327,8 @@ function registerCommands(
   const searchSnippets = vscode.commands.registerCommand('starcode-snippets.searchSnippets', async () => {
     await searchManager.startSearch()
   })
+
+
 
   // 注册清除搜索命令
   const clearSearch = vscode.commands.registerCommand('starcode-snippets.clearSearch', () => {
@@ -1457,6 +1591,7 @@ function registerCommands(
     moveToDirectory,
     insertSnippetCommand,
     createSnippetInDirectory,
+    createSnippet,
     exportSnippet,
     exportAll,
     importSnippets,

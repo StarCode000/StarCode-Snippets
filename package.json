@@ -95,8 +95,14 @@
         "icon": "$(move)"
       },
       {
-        "command": "starcode-snippets.createSnippetInDirectory",
+        "command": "starcode-snippets.createSnippet",
         "title": "新建代码片段",
+        "category": "StarCode Snippets",
+        "icon": "$(add)"
+      },
+      {
+        "command": "starcode-snippets.createSnippetInDirectory",
+        "title": "在目录中新建代码片段",
         "category": "StarCode Snippets",
         "icon": "$(add)"
       },
@@ -136,6 +142,7 @@
         "category": "StarCode Snippets",
         "icon": "$(search)"
       },
+
       {
         "command": "starcode-snippets.clearSearch",
         "title": "清除搜索",
@@ -247,22 +254,22 @@
           "group": "navigation@3"
         },
         {
-          "command": "starcode-snippets.createDirectory",
+          "command": "starcode-snippets.createSnippet",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@4"
         },
         {
-          "command": "starcode-snippets.importSnippets",
+          "command": "starcode-snippets.createDirectory",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@5"
         },
         {
-          "command": "starcode-snippets.exportAll",
+          "command": "starcode-snippets.importSnippets",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
         },
         {
-          "command": "starcode-snippets.openDataViewer",
+          "command": "starcode-snippets.exportAll",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@7"
         }

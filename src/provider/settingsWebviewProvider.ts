@@ -2239,6 +2239,14 @@ export class SettingsWebviewProvider {
                     
                     // 缓存多平台配置
                     if (message.multiConfig && message.multiConfig.platforms) {
+                        // 先清空所有缓存，确保删除的配置不会残留
+                        platformConfigs = {
+                            github: null,
+                            gitlab: null,
+                            gitee: null
+                        };
+                        
+                        // 然后只缓存实际存在的平台配置
                         message.multiConfig.platforms.forEach(platform => {
                             // 合并平台配置和全局自动同步设置
                             const platformWithGlobalSettings = {
@@ -2409,6 +2417,14 @@ export class SettingsWebviewProvider {
                     vscode.postMessage({ type: 'loadConfig' });
                     break;
                 case 'platformConfigDeleted':
+                    // 清除缓存中对应的配置
+                    if (message.configId && multiPlatformConfig && multiPlatformConfig.platforms) {
+                        const deletedPlatform = multiPlatformConfig.platforms.find(p => p.id === message.configId);
+                        if (deletedPlatform && deletedPlatform.provider) {
+                            platformConfigs[deletedPlatform.provider] = null;
+                            // console.log('已清除缓存中的', getPlatformName(deletedPlatform.provider), '配置');
+                        }
+                    }
                     showStatus('平台配置已删除', 'success');
                     // 重新加载配置以更新显示
                     vscode.postMessage({ type: 'loadConfig' });
