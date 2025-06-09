@@ -53,7 +53,8 @@ export class V1StorageStrategy implements StorageStrategy {
       return oldSnippets
     }
 
-    return snippets
+    // 将V2数据转换为V1格式，或直接返回V1数据
+    return snippets as unknown as CodeSnippetV1[]
   }
 
   async getAllDirectories(): Promise<DirectoryV1[]> {
@@ -68,7 +69,8 @@ export class V1StorageStrategy implements StorageStrategy {
       return oldDirectories
     }
 
-    return directories
+    // 将V2数据转换为V1格式，或直接返回V1数据
+    return directories as unknown as DirectoryV1[]
   }
 
   async getSnippetById(id: string): Promise<CodeSnippetV1 | null> {
@@ -84,11 +86,11 @@ export class V1StorageStrategy implements StorageStrategy {
   }
 
   async saveSnippet(snippet: CodeSnippetV1): Promise<void> {
-    return this.storageManager.saveSnippet(snippet)
+    return this.storageManager.saveSnippet(snippet as unknown as any)
   }
 
   async updateSnippet(snippet: CodeSnippetV1): Promise<void> {
-    return this.storageManager.updateSnippet(snippet)
+    return this.storageManager.updateSnippet(snippet as unknown as any)
   }
 
   async deleteSnippet(id: string): Promise<void> {
@@ -96,11 +98,11 @@ export class V1StorageStrategy implements StorageStrategy {
   }
 
   async createDirectory(directory: DirectoryV1): Promise<void> {
-    return this.storageManager.createDirectory(directory)
+    return this.storageManager.createDirectory(directory as unknown as any)
   }
 
   async updateDirectory(directory: DirectoryV1): Promise<void> {
-    return this.storageManager.updateDirectory(directory)
+    return this.storageManager.updateDirectory(directory as unknown as any)
   }
 
   async deleteDirectory(id: string): Promise<void> {

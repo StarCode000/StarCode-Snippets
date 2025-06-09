@@ -40,9 +40,13 @@ export interface DirectoryV2 {
   order: number
 }
 
-// ===== 当前使用的类型别名（指向V1以保持兼容性） =====
-export type CodeSnippet = CodeSnippetV1
-export type Directory = DirectoryV1
+// ===== 已弃用的类型别名（指向V1） =====
+export type CodeSnippetDeprecatedType = CodeSnippetV1
+export type DirectoryDeprecatedType = DirectoryV1
+
+// ===== 当前使用的类型别名（指向V2） =====
+export type CodeSnippet = CodeSnippetV2
+export type Directory = DirectoryV2
 
 // ===== 导出数据格式 =====
 export interface ExportDataV1 {

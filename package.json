@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.4.0",
+  "version": "0.4.2",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -142,7 +142,6 @@
         "category": "StarCode Snippets",
         "icon": "$(search)"
       },
-
       {
         "command": "starcode-snippets.clearSearch",
         "title": "清除搜索",
@@ -240,6 +239,12 @@
         "icon": "$(repo-sync)"
       },
       {
+        "command": "starcode-snippets.applyResolvedConflicts",
+        "title": "应用已解决的冲突",
+        "category": "StarCode Snippets",
+        "icon": "$(check-all)"
+      },
+      {
         "command": "starcode-snippets.testEditorDetection",
         "title": "测试编辑器检测",
         "category": "StarCode Snippets - Debug",
@@ -326,6 +331,16 @@
           "group": "1_creation@1"
         },
         {
+          "command": "starcode-snippets.rename",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
+          "group": "2_modify@1"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
+          "group": "2_modify@2"
+        },
+        {
           "command": "starcode-snippets.previewSnippet",
           "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
           "group": "inline@1"
@@ -386,6 +401,16 @@
           "group": "5_export@1"
         },
         {
+          "command": "starcode-snippets.rename",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
+          "group": "6_modify@1"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
+          "group": "6_modify@2"
+        },
+        {
           "command": "starcode-snippets.manualSync",
           "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
           "group": "inline@1"
@@ -412,7 +437,6 @@
     "configuration": {
       "title": "StarCode Snippets",
       "properties": {
-
         "starcode-snippets.cloudSyncStatus": {
           "type": "object",
           "default": {
@@ -473,7 +497,11 @@
                   },
                   "provider": {
                     "type": "string",
-                    "enum": ["github", "gitlab", "gitee"],
+                    "enum": [
+                      "github",
+                      "gitlab",
+                      "gitee"
+                    ],
                     "description": "Git 平台提供商"
                   },
                   "repositoryUrl": {
@@ -520,7 +548,10 @@
               "description": "自动同步间隔（分钟）"
             },
             "activeConfigId": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "description": "当前激活的配置ID"
             }
           }
@@ -566,7 +597,7 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
-    "eslint": "^9.19.0",
+    "eslint": "^9.28.0",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",

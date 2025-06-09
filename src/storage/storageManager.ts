@@ -217,13 +217,30 @@ export class StorageManager {
     }
   }
 
-  // 保存代码片段
+  // 保存代码片段（如果已存在相同路径的代码片段则更新，否则新增）
   public async saveSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      snippets.push(snippet)
+      const existingIndex = snippets.findIndex((s) => s.fullPath === snippet.fullPath)
+      
+      if (existingIndex >= 0) {
+        // 已存在相同路径的代码片段，更新它
+        const existing = snippets[existingIndex]
+        
+        if (!this.hasSnippetChanged(existing, snippet)) {
+          // console.log(`代码片段无变化，跳过保存: ${snippet.name}`)
+          return
+        }
+        
+        snippets[existingIndex] = snippet
+        // console.log(`代码片段已更新: ${snippet.name}`)
+      } else {
+        // 不存在相同路径的代码片段，新增
+        snippets.push(snippet)
+        // console.log(`代码片段已新增: ${snippet.name}`)
+      }
+      
       await this.writeFileWithRetry(this.snippetsFile, snippets)
-      // console.log(`代码片段已保存: ${snippet.name}`)
     } catch (error) {
       console.error('保存代码片段失败:', error)
       throw error
@@ -234,10 +251,10 @@ export class StorageManager {
   public async updateSnippet(snippet: CodeSnippet): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const index = snippets.findIndex((s) => s.id === snippet.id)
+      const index = snippets.findIndex((s) => s.fullPath === snippet.fullPath)
 
       if (index === -1) {
-        throw new Error(`代码片段不存在: ${snippet.id}`)
+        throw new Error(`代码片段不存在: ${snippet.fullPath}`)
       }
 
       const existing = snippets[index]
@@ -257,13 +274,13 @@ export class StorageManager {
   }
 
   // 删除代码片段
-  public async deleteSnippet(id: string): Promise<void> {
+  public async deleteSnippet(fullPath: string): Promise<void> {
     try {
       const snippets = await this.getAllSnippets()
-      const index = snippets.findIndex((s) => s.id === id)
+      const index = snippets.findIndex((s) => s.fullPath === fullPath)
 
       if (index === -1) {
-        throw new Error(`代码片段不存在: ${id}`)
+        throw new Error(`代码片段不存在: ${fullPath}`)
       }
 
       const deletedSnippet = snippets[index]
@@ -293,10 +310,10 @@ export class StorageManager {
   public async updateDirectory(directory: Directory): Promise<void> {
     try {
       const directories = await this.getAllDirectories()
-      const index = directories.findIndex((d) => d.id === directory.id)
+      const index = directories.findIndex((d) => d.fullPath === directory.fullPath)
 
       if (index === -1) {
-        throw new Error(`目录不存在: ${directory.id}`)
+        throw new Error(`目录不存在: ${directory.fullPath}`)
       }
 
       const existing = directories[index]
@@ -316,30 +333,30 @@ export class StorageManager {
   }
 
   // 删除目录
-  public async deleteDirectory(id: string): Promise<void> {
+  public async deleteDirectory(fullPath: string): Promise<void> {
     try {
       const [directories, snippets] = await Promise.all([this.getAllDirectories(), this.getAllSnippets()])
 
-      const directoryIndex = directories.findIndex((d) => d.id === id)
+      const directoryIndex = directories.findIndex((d) => d.fullPath === fullPath)
       if (directoryIndex === -1) {
-        throw new Error(`目录不存在: ${id}`)
+        throw new Error(`目录不存在: ${fullPath}`)
       }
 
       const deletedDirectory = directories[directoryIndex]
 
-      // 递归删除子目录和代码片段
-      const toDelete = this.findAllChildItems(id, directories, snippets)
+      // 递归删除子目录和代码片段（基于路径前缀）
+      const toDelete = this.findAllChildItemsByPath(fullPath, directories, snippets)
 
       // 删除所有子项目
       for (const item of toDelete.snippets) {
-        const snippetIndex = snippets.findIndex((s) => s.id === item.id)
+        const snippetIndex = snippets.findIndex((s) => s.fullPath === item.fullPath)
         if (snippetIndex >= 0) {
           snippets.splice(snippetIndex, 1)
         }
       }
 
       for (const item of toDelete.directories) {
-        const dirIndex = directories.findIndex((d) => d.id === item.id)
+        const dirIndex = directories.findIndex((d) => d.fullPath === item.fullPath)
         if (dirIndex >= 0) {
           directories.splice(dirIndex, 1)
         }
@@ -361,30 +378,29 @@ export class StorageManager {
     }
   }
 
-  // 递归查找所有子项目
-  private findAllChildItems(
-    parentId: string,
+  // 递归查找所有子项目（基于路径前缀）
+  private findAllChildItemsByPath(
+    parentPath: string,
     directories: Directory[],
     snippets: CodeSnippet[]
   ): {
     directories: Directory[]
     snippets: CodeSnippet[]
   } {
-    const childDirectories = directories.filter((d) => d.parentId === parentId)
-    const childSnippets = snippets.filter((s) => s.parentId === parentId)
-
-    let allChildDirectories = [...childDirectories]
-    let allChildSnippets = [...childSnippets]
-
-    for (const childDir of childDirectories) {
-      const grandChildren = this.findAllChildItems(childDir.id, directories, snippets)
-      allChildDirectories.push(...grandChildren.directories)
-      allChildSnippets.push(...grandChildren.snippets)
-    }
+    // 确保父路径以 '/' 结尾，以便正确匹配子路径
+    const normalizedParentPath = parentPath.endsWith('/') ? parentPath : parentPath + '/'
+    
+    // 查找所有以父路径为前缀的子目录和代码片段
+    const childDirectories = directories.filter((d) => 
+      d.fullPath.startsWith(normalizedParentPath) && d.fullPath !== parentPath
+    )
+    const childSnippets = snippets.filter((s) => 
+      s.fullPath.startsWith(normalizedParentPath)
+    )
 
     return {
-      directories: allChildDirectories,
-      snippets: allChildSnippets,
+      directories: childDirectories,
+      snippets: childSnippets,
     }
   }
 
@@ -412,13 +428,13 @@ export class StorageManager {
       existing.name !== updated.name ||
       existing.code !== updated.code ||
       existing.language !== updated.language ||
-      existing.parentId !== updated.parentId
+      existing.fullPath !== updated.fullPath
     )
   }
 
   // 检查目录是否有变化
   private hasDirectoryChanged(existing: Directory, updated: Directory): boolean {
-    return existing.name !== updated.name || existing.parentId !== updated.parentId || existing.order !== updated.order
+    return existing.name !== updated.name || existing.fullPath !== updated.fullPath || existing.order !== updated.order
   }
 
   // 获取扩展上下文

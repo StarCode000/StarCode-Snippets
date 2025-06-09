@@ -24,6 +24,7 @@ build-extension.js
 *.md
 !README.md
 !CHANGELOG.md
+*.txt
 
 # 构建产物
 *.vsix

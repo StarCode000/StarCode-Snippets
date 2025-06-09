@@ -21,9 +21,8 @@ export const isSet = (value: any): value is Set<any> => value instanceof Set
 export function isDirectory(item: any): item is Directory {
   return (
     item &&
-    typeof item.id === 'string' &&
     typeof item.name === 'string' &&
-    (item.parentId === null || typeof item.parentId === 'string') &&
+    typeof item.fullPath === 'string' &&
     typeof item.order === 'number'
   )
 }
@@ -31,13 +30,12 @@ export function isDirectory(item: any): item is Directory {
 export function isCodeSnippet(item: any): item is CodeSnippet {
   return (
     item &&
-    typeof item.id === 'string' &&
     typeof item.name === 'string' &&
     typeof item.code === 'string' &&
     typeof item.filePath === 'string' &&
     typeof item.fileName === 'string' &&
     typeof item.category === 'string' &&
-    (item.parentId === null || typeof item.parentId === 'string') &&
+    typeof item.fullPath === 'string' &&
     typeof item.order === 'number' &&
     typeof item.createTime === 'number'
   )

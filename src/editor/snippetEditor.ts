@@ -14,7 +14,7 @@ export class SnippetEditor {
   private extensionContext: vscode.ExtensionContext // Store context
 
   // 跟踪当前正在编辑的Webview面板
-  // Key: snippet.id, Value: { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }
+  // Key: snippet fullPath, Value: { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }
   private editingWebviews = new Map<
     string,
     {
@@ -57,10 +57,17 @@ export class SnippetEditor {
     return text
   }
 
+  // 为V2兼容性提供ID获取方法
+  private getSnippetId(snippet: CodeSnippet): string {
+    // V2使用fullPath作为唯一标识
+    return (snippet as any).fullPath || (snippet as any).id || snippet.name
+  }
+
   public async edit(snippet: CodeSnippet): Promise<void> {
     const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined
 
-    const existingSession = this.editingWebviews.get(snippet.id)
+    const snippetId = this.getSnippetId(snippet)
+    const existingSession = this.editingWebviews.get(snippetId)
     if (existingSession) {
       existingSession.panel.reveal(column)
       return
@@ -89,13 +96,13 @@ export class SnippetEditor {
       lastSavedCode: initialCode,
       isDirtyInWebview: false, // Webview会通过消息更新这个状态
     }
-    this.editingWebviews.set(snippet.id, session)
+    this.editingWebviews.set(snippetId, session)
 
     panel.webview.html = this._getWebviewContent(panel.webview, snippet)
 
     panel.onDidDispose(
       () => {
-        const disposedSession = this.editingWebviews.get(snippet.id)
+        const disposedSession = this.editingWebviews.get(snippetId)
         if (disposedSession && disposedSession.isDirtyInWebview) {
           // console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`)
           // 自动保存逻辑
@@ -120,7 +127,7 @@ export class SnippetEditor {
               vscode.window.showErrorMessage(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败。`)
             })
         }
-        this.editingWebviews.delete(snippet.id)
+        this.editingWebviews.delete(snippetId)
         if (this.editingWebviews.size === 0) {
           ContextManager.setEditingSnippet(false)
         }
@@ -131,11 +138,29 @@ export class SnippetEditor {
 
     panel.webview.onDidReceiveMessage(
       async (message) => {
+        // 【重要修复】检查webview是否已被销毁
+        try {
+          if (panel.webview === undefined) {
+            console.warn('收到消息但webview已被销毁:', message.type)
+            return
+          }
+        } catch (error) {
+          console.warn('Webview已被销毁，忽略消息:', message.type)
+          return
+        }
+
         // console.log('收到WebView消息:', message.type, message.snippetId)
 
-        const currentSession = this.editingWebviews.get(message.snippetId || snippet.id)
+        const messageSnippetId = message.snippetId || snippetId
+        const currentSession = this.editingWebviews.get(messageSnippetId)
         if (!currentSession) {
-          console.warn('Received message for non-existent session:', message.snippetId)
+          console.warn('Received message for non-existent session:', messageSnippetId)
+          return
+        }
+        
+        // 【重要修复】再次检查当前session的panel是否还有效
+        if (currentSession.panel !== panel || currentSession.panel.webview === undefined) {
+          console.warn('Session panel已失效，忽略消息:', message.type)
           return
         }
 
@@ -147,14 +172,19 @@ export class SnippetEditor {
               // console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50))
             }
 
-            panel.webview.postMessage({
-              type: 'loadSnippet',
-              data: {
-                code: currentSession.currentCode,
-                language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
-                snippetId: currentSession.snippet.id,
-              },
-            })
+            // 【重要修复】发送消息前检查webview是否还有效
+            try {
+              panel.webview.postMessage({
+                type: 'loadSnippet',
+                data: {
+                  code: currentSession.currentCode,
+                  language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
+                  snippetId: this.getSnippetId(currentSession.snippet),
+                },
+              })
+            } catch (error) {
+              console.warn('发送loadSnippet消息失败，webview可能已被销毁:', error)
+            }
             // console.log('已发送loadSnippet消息到WebView')
             break
           case 'saveSnippet': {
@@ -176,11 +206,21 @@ export class SnippetEditor {
               currentSession.isDirtyInWebview = false
               this._onDidSaveSnippet.fire(updatedSnippet)
               vscode.window.showInformationMessage(`代码片段 "${updatedSnippet.name}" 已保存。`)
-              panel.webview.postMessage({ type: 'saveSuccess', snippetId: currentSession.snippet.id })
+              // 【重要修复】发送消息前检查webview是否还有效
+              try {
+                panel.webview.postMessage({ type: 'saveSuccess', snippetId: this.getSnippetId(currentSession.snippet) })
+              } catch (error) {
+                console.warn('发送saveSuccess消息失败，webview可能已被销毁:', error)
+              }
             } catch (error) {
               console.error('保存代码片段失败 (来自webview):', error)
               vscode.window.showErrorMessage(`保存代码片段 "${updatedSnippet.name}" 失败。`)
-              panel.webview.postMessage({ type: 'saveError', snippetId: currentSession.snippet.id })
+              // 【重要修复】发送消息前检查webview是否还有效
+              try {
+                panel.webview.postMessage({ type: 'saveError', snippetId: this.getSnippetId(currentSession.snippet) })
+              } catch (error) {
+                console.warn('发送saveError消息失败，webview可能已被销毁:', error)
+              }
             }
             break
           }
@@ -198,45 +238,52 @@ export class SnippetEditor {
     ContextManager.setEditingSnippet(true)
   }
 
-  /**
-   * 关闭所有编辑会话
-   */
   public closeAllSessions(): void {
-    this.editingWebviews.forEach(session => {
-      session.panel.dispose();
-    });
-    this.editingWebviews.clear();
-    ContextManager.setEditingSnippet(false);
+    for (const [id, session] of this.editingWebviews) {
+      session.panel.dispose()
+    }
+    this.editingWebviews.clear()
+    ContextManager.setEditingSnippet(false)
   }
 
   private mapLanguageToVSCode(language: string): string {
-    switch (language.toLowerCase()) {
-      case 'vue':
-        return 'html'
-      case 'shell':
-        return 'shellscript'
-      case 'c#':
-      case 'csharp':
-        return 'csharp'
-      case 'c++':
-      case 'cpp':
-        return 'cpp'
-      case 'yaml':
-      case 'yml':
-        return 'yaml'
-      default:
-        return language
+    const languageMap: Record<string, string> = {
+      js: 'javascript',
+      ts: 'typescript',
+      py: 'python',
+      cpp: 'cpp',
+      'c++': 'cpp',
+      cs: 'csharp',
+      'c#': 'csharp',
+      rb: 'ruby',
+      go: 'go',
+      rs: 'rust',
+      php: 'php',
+      java: 'java',
+      kt: 'kotlin',
+      swift: 'swift',
+      plaintext: 'plaintext',
     }
+    return languageMap[language?.toLowerCase()] || language?.toLowerCase() || 'plaintext'
   }
 
   private mapVSCodeLanguageIdToOurs(vscodeLangId: string, originalLanguage?: string): string {
-    if (originalLanguage) {
-      const lowerOriginal = originalLanguage.toLowerCase()
-      if (vscodeLangId === 'html' && lowerOriginal === 'vue') {return 'vue'}
-      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') {return 'shell'}
+    const reverseMap: Record<string, string> = {
+      javascript: 'js',
+      typescript: 'ts',
+      python: 'py',
+      cpp: 'cpp',
+      csharp: 'cs',
+      ruby: 'rb',
+      go: 'go',
+      rust: 'rs',
+      php: 'php',
+      java: 'java',
+      kotlin: 'kt',
+      swift: 'swift',
+      plaintext: 'plaintext',
     }
-    if (vscodeLangId === 'shellscript') {return 'shell'}
-    return vscodeLangId
+    return reverseMap[vscodeLangId] || originalLanguage || vscodeLangId || 'plaintext'
   }
 
   private _getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
@@ -395,14 +442,13 @@ export class SnippetEditor {
         <script nonce="${nonce}">
           const vscode = acquireVsCodeApi();
           let editor;
-          let currentSnippetId = "${snippet.id}"; 
+          let currentSnippetId = "${this.getSnippetId(snippet)}"; 
           let currentLanguage = ""; 
           let internalDirtyFlag = false;
           let saveInProgress = false;
           const statusMessageElement = document.getElementById('status-message');
           const debugInfoElement = document.getElementById('debug-info');
           const languageSelect = document.getElementById('language-select');
-          const debugToggleButton = document.getElementById('debug-toggle');
           let isDebugVisible = false; // 默认隐藏调试面板
           
           // 调试日志函数
@@ -416,17 +462,11 @@ export class SnippetEditor {
 
           // 初始化调试面板状态
           debugInfoElement.style.display = 'none';
-          debugToggleButton.textContent = '显示调试信息';
           
           // 初始化调试面板切换按钮
-          debugToggleButton.addEventListener('click', () => {
+          document.getElementById('debug-toggle').addEventListener('click', () => {
             isDebugVisible = !isDebugVisible;
             debugInfoElement.style.display = isDebugVisible ? 'block' : 'none';
-            debugToggleButton.textContent = isDebugVisible ? '隐藏调试信息' : '显示调试信息';
-            
-            if (isDebugVisible) {
-              debugInfoElement.scrollTop = debugInfoElement.scrollHeight;
-            }
           });
 
           function updateStatus(message, isError = false) {
@@ -599,7 +639,6 @@ export class SnippetEditor {
                     // 错误时自动显示调试面板
                     isDebugVisible = true;
                     debugInfoElement.style.display = 'block';
-                    debugToggleButton.textContent = '隐藏调试信息';
                   });
                   
                 } catch (error) {
@@ -608,7 +647,6 @@ export class SnippetEditor {
                   // 错误时自动显示调试面板
                   isDebugVisible = true;
                   debugInfoElement.style.display = 'block';
-                  debugToggleButton.textContent = '隐藏调试信息';
                 }
                 break;
               case 'saveSuccess':

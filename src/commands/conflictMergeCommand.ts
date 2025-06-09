@@ -3,7 +3,7 @@ import { SettingsManager } from '../utils/settingsManager'
 import { simpleGit } from 'simple-git'
 import * as fs from 'fs'
 import * as path from 'path'
-import { CodeSnippet, Directory } from '../types/types'
+import { CodeSnippetDeprecatedType, DirectoryDeprecatedType } from '../types/types'
 
 /**
  * Git冲突合并处理命令
@@ -379,10 +379,10 @@ async function performSmartMerge(repoPath: string, fileName: string, operations:
 /**
  * 合并代码片段数据
  */
-function mergeSnippetsData(localSnippets: CodeSnippet[], remoteSnippets: CodeSnippet[], operations: string[], conflictIndex: number): CodeSnippet[] {
+function mergeSnippetsData(localSnippets: CodeSnippetDeprecatedType[], remoteSnippets: CodeSnippetDeprecatedType[], operations: string[], conflictIndex: number): CodeSnippetDeprecatedType[] {
   operations.push(`    🔀 冲突 ${conflictIndex}: 合并代码片段数据...`)
   
-  const merged = new Map<string, CodeSnippet>()
+  const merged = new Map<string, CodeSnippetDeprecatedType>()
   
   // 添加本地片段
   localSnippets.forEach(snippet => {
@@ -421,10 +421,10 @@ function mergeSnippetsData(localSnippets: CodeSnippet[], remoteSnippets: CodeSni
 /**
  * 合并目录数据
  */
-function mergeDirectoriesData(localDirs: Directory[], remoteDirs: Directory[], operations: string[], conflictIndex: number): Directory[] {
+function mergeDirectoriesData(localDirs: DirectoryDeprecatedType[], remoteDirs: DirectoryDeprecatedType[], operations: string[], conflictIndex: number): DirectoryDeprecatedType[] {
   operations.push(`    🔀 冲突 ${conflictIndex}: 合并目录数据...`)
   
-  const merged = new Map<string, Directory>()
+  const merged = new Map<string, DirectoryDeprecatedType>()
   
   // 添加本地目录
   localDirs.forEach(dir => {
