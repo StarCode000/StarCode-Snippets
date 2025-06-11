@@ -634,7 +634,7 @@ export class SettingsWebviewProvider {
 
       // console.log(`手动同步获取到数据: ${snippets.length} 个代码片段, ${directories.length} 个目录`)
 
-      const result = await cloudSyncManager.performSync(snippets, directories)
+      const result = await cloudSyncManager.sync(snippets, directories)
 
       panel.webview.postMessage({
         type: 'manualSyncResult',

@@ -220,27 +220,81 @@ export class StorageManager {
   // 保存代码片段（如果已存在相同路径的代码片段则更新，否则新增）
   public async saveSnippet(snippet: CodeSnippet): Promise<void> {
     try {
+      console.log(`🔍 StorageManager.saveSnippet: 尝试保存片段 ${snippet.fullPath}`)
+      
       const snippets = await this.getAllSnippets()
+      console.log(`   当前存储中有 ${snippets.length} 个代码片段`)
+      
+      // 【增强】多重检查避免重复
       const existingIndex = snippets.findIndex((s) => s.fullPath === snippet.fullPath)
+      console.log(`   通过fullPath查找现有片段: ${existingIndex >= 0 ? `找到在索引${existingIndex}` : '未找到'}`)
+      
+      // 【新增】额外的重复检查：检查是否有相同名称和路径的片段
+      const duplicatesByName = snippets.filter(s => s.name === snippet.name && s.fullPath === snippet.fullPath)
+      if (duplicatesByName.length > 1) {
+        console.log(`   ⚠️ 警告: 发现${duplicatesByName.length}个同名同路径的重复片段，将清理`)
+        // 保留第一个，删除其他重复项
+        for (let i = duplicatesByName.length - 1; i > 0; i--) {
+          const dupIndex = snippets.findIndex(s => s === duplicatesByName[i])
+          if (dupIndex >= 0) {
+            snippets.splice(dupIndex, 1)
+            console.log(`   🧹 清理重复片段，删除索引${dupIndex}`)
+          }
+        }
+      }
       
       if (existingIndex >= 0) {
         // 已存在相同路径的代码片段，更新它
         const existing = snippets[existingIndex]
+        console.log(`   现有片段信息: 名称=${existing.name}, 创建时间=${existing.createTime}`)
+        console.log(`   新片段信息: 名称=${snippet.name}, 创建时间=${snippet.createTime}`)
         
         if (!this.hasSnippetChanged(existing, snippet)) {
-          // console.log(`代码片段无变化，跳过保存: ${snippet.name}`)
+          console.log(`   代码片段无变化，跳过保存: ${snippet.name}`)
           return
         }
         
         snippets[existingIndex] = snippet
-        // console.log(`代码片段已更新: ${snippet.name}`)
+        console.log(`   ✅ 代码片段已更新: ${snippet.name}`)
       } else {
-        // 不存在相同路径的代码片段，新增
+        // 不存在相同路径的代码片段，检查是否真的需要新增
+        const sameName = snippets.filter(s => s.name === snippet.name)
+        if (sameName.length > 0) {
+          console.log(`   ⚠️ 发现${sameName.length}个同名片段:`)
+          sameName.forEach((s, i) => {
+            console.log(`     ${i + 1}. 路径: ${s.fullPath}, 创建时间: ${s.createTime}`)
+          })
+        }
+        
         snippets.push(snippet)
-        // console.log(`代码片段已新增: ${snippet.name}`)
+        console.log(`   ✅ 代码片段已新增: ${snippet.name}`)
+      }
+      
+      // 【新增】保存前最终检查
+      const finalCheck = snippets.filter(s => s.fullPath === snippet.fullPath)
+      if (finalCheck.length > 1) {
+        console.log(`   ❌ 错误: 保存前发现${finalCheck.length}个相同路径的片段，进行最终清理`)
+        // 保留最新的（通常是最后一个）
+        const latestTime = Math.max(...finalCheck.map(s => s.createTime || 0))
+        const toKeep = finalCheck.find(s => (s.createTime || 0) === latestTime) || finalCheck[finalCheck.length - 1]
+        
+        // 移除所有相同路径的片段
+        for (let i = snippets.length - 1; i >= 0; i--) {
+          if (snippets[i].fullPath === snippet.fullPath && snippets[i] !== toKeep) {
+            snippets.splice(i, 1)
+            console.log(`   🧹 清理重复片段，删除索引${i}`)
+          }
+        }
+        
+        // 确保保留的片段是最新的数据
+        const keepIndex = snippets.findIndex(s => s === toKeep)
+        if (keepIndex >= 0) {
+          snippets[keepIndex] = snippet
+        }
       }
       
       await this.writeFileWithRetry(this.snippetsFile, snippets)
+      console.log(`   💾 数据已保存到文件`)
     } catch (error) {
       console.error('保存代码片段失败:', error)
       throw error

@@ -157,7 +157,7 @@ export class ConflictResolver {
         } else {
           // 远程更新，说明远程添加了内容，使用远程版本
           console.log('检测到远程版本更新且内容较多，判定为远程增量添加，使用远程版本')
-          return { success: true, merged: normalizedRemote }
+        return { success: true, merged: normalizedRemote }
         }
       }
       
@@ -170,7 +170,7 @@ export class ConflictResolver {
         } else {
           // 本地更新，说明本地添加了内容，使用本地版本
           console.log('检测到本地版本更新且内容较多，判定为本地增量添加，使用本地版本')
-          return { success: true, merged: normalizedLocal }
+        return { success: true, merged: normalizedLocal }
         }
       }
       

@@ -244,17 +244,12 @@
         "category": "StarCode Snippets",
         "icon": "$(check-all)"
       },
+
       {
-        "command": "starcode-snippets.testEditorDetection",
-        "title": "测试编辑器检测",
-        "category": "StarCode Snippets - Debug",
-        "icon": "$(debug-alt)"
-      },
-      {
-        "command": "starcode-snippets.testEditorSpecificPaths",
-        "title": "测试编辑器特定路径",
-        "category": "StarCode Snippets - Debug",
-        "icon": "$(folder)"
+        "command": "starcode-snippets.clearUnfinishedMerge",
+        "title": "清理未完成的合并状态",
+        "category": "StarCode Snippets",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {

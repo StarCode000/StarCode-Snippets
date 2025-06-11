@@ -6,6 +6,47 @@ import * as path from 'path'
 import { CodeSnippetDeprecatedType, DirectoryDeprecatedType } from '../types/types'
 
 /**
+ * 弹出冲突解决选择界面
+ */
+export async function showConflictResolutionDialog(localDataInfo: { snippets: number; directories: number }): Promise<'smart_merge' | 'force_local' | 'force_remote' | 'manual' | 'cancel'> {
+  const options = [
+    {
+      label: '🔄 智能合并 (推荐)',
+      detail: '自动分析并合并本地和远程数据，保护用户数据',
+      action: 'smart_merge' as const
+    },
+    {
+      label: '⬇️ 使用远程数据',
+      detail: '丢弃本地数据，使用远程仓库数据',
+      action: 'force_remote' as const
+    },
+    {
+      label: '⬆️ 使用本地数据',
+      detail: '忽略远程数据，强制使用本地数据',
+      action: 'force_local' as const
+    },
+    {
+      label: '🔧 手动解决冲突',
+      detail: '打开冲突解决工具，手动处理数据冲突',
+      action: 'manual' as const
+    },
+    {
+      label: '❌ 取消同步',
+      detail: '暂停同步，稍后再处理',
+      action: 'cancel' as const
+    }
+  ]
+
+  const selected = await vscode.window.showQuickPick(options, {
+    placeHolder: `⚠️ 数据冲突：本地 ${localDataInfo.snippets} 个代码片段，远程也有数据。请选择解决方式：`,
+    ignoreFocusOut: true,
+    canPickMany: false
+  })
+
+  return selected?.action || 'cancel'
+}
+
+/**
  * Git冲突合并处理命令
  */
 export function registerConflictMergeCommand(context: vscode.ExtensionContext, storageManager: any): vscode.Disposable {

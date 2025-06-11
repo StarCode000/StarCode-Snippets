@@ -5,6 +5,7 @@ import { CodeSnippet, Directory } from '../types/types'
 import { SearchManager } from '../utils/searchManager'
 import { SettingsManager } from '../utils/settingsManager'
 import { PathBasedManager } from '../utils/pathBasedManager'
+import { DetailedSyncStatusManager } from '../utils/detailedSyncStatusManager'
 
 export class SnippetTreeItem extends vscode.TreeItem {
   constructor(
@@ -69,6 +70,7 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   private _searchManager: SearchManager
   private _statusUpdateTimer: NodeJS.Timeout | undefined
   private _isV2Format: boolean = false
+  private _detailedStatusManager: DetailedSyncStatusManager | null = null
 
   constructor(private storageManager: StorageManager, searchManager: SearchManager) {
     this._searchManager = searchManager
@@ -95,6 +97,19 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         this._initialized = true
         this._onDidChangeTreeData.fire()
       })
+  }
+
+  /**
+   * 设置扩展上下文以初始化详细状态管理器
+   */
+  public setContext(context: vscode.ExtensionContext): void {
+    this._detailedStatusManager = DetailedSyncStatusManager.getInstance(context)
+    
+    // 监听详细状态变化
+    this._detailedStatusManager.onStatusChange(() => {
+      // 状态变化时刷新树视图
+      this._onDidChangeTreeData.fire()
+    })
   }
 
   /**
@@ -418,31 +433,41 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       {
         let statusText = ''
         let statusIcon = ''
+        let detailedTooltip = ''
 
         // 检查是否配置了同步
         const hasConfig = syncConfig.repositoryUrl && syncConfig.repositoryUrl.trim() !== ''
 
-        if (!hasConfig) {
-          statusText = '未配置云端同步'
-          statusIcon = 'cloud-offline'
-        } else if (syncStatus.isSyncing) {
-          statusText = '正在同步...'
-          statusIcon = 'sync~spin'
-        } else if (syncStatus.isConnected) {
-          if (syncStatus.lastSyncTime) {
-            statusText = this._generateSyncTimeText(syncStatus.lastSyncTime)
-          } else {
-            statusText = '已连接，未同步'
-          }
-          statusIcon = 'cloud'
+        // 优先使用详细状态管理器的信息
+        if (this._detailedStatusManager) {
+          const detailedStatus = this._detailedStatusManager.getCurrentStatus()
+          statusText = this._detailedStatusManager.getStatusBarText()
+          statusIcon = this._detailedStatusManager.getStatusIcon()
+          detailedTooltip = this._detailedStatusManager.getTooltip()
         } else {
-          statusText = '未连接'
-          statusIcon = 'cloud-offline'
-        }
+          // 回退到原有的状态显示逻辑
+          if (!hasConfig) {
+            statusText = '未配置云端同步'
+            statusIcon = 'cloud-offline'
+          } else if (syncStatus.isSyncing) {
+            statusText = '正在同步...'
+            statusIcon = 'sync~spin'
+          } else if (syncStatus.isConnected) {
+            if (syncStatus.lastSyncTime) {
+              statusText = this._generateSyncTimeText(syncStatus.lastSyncTime)
+            } else {
+              statusText = '已连接，未同步'
+            }
+            statusIcon = 'cloud'
+          } else {
+            statusText = '未连接'
+            statusIcon = 'cloud-offline'
+          }
 
-        if (syncStatus.lastError && syncStatus.lastError.trim() !== '') {
-          statusText += ` (错误)`
-          statusIcon = 'warning'
+          if (syncStatus.lastError && syncStatus.lastError.trim() !== '') {
+            statusText += ` (错误)`
+            statusIcon = 'warning'
+          }
         }
         
         // 显示平台名称
@@ -466,9 +491,12 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         const syncStatusItem = new SnippetTreeItem(statusText, vscode.TreeItemCollapsibleState.None)
         syncStatusItem.contextValue = 'syncStatus'
         syncStatusItem.iconPath = new vscode.ThemeIcon(statusIcon)
-        syncStatusItem.tooltip = `点击打开云端同步设置\n\n平台: ${hasConfig ? platformName : '未配置'}\n仓库: ${syncConfig.repositoryUrl || '未配置'}\n状态: ${
+        
+        // 使用详细状态管理器的工具提示，如果没有则使用默认工具提示
+        syncStatusItem.tooltip = detailedTooltip || `点击打开云端同步设置\n\n平台: ${hasConfig ? platformName : '未配置'}\n仓库: ${syncConfig.repositoryUrl || '未配置'}\n状态: ${
           hasConfig ? (syncStatus.isConnected ? '已连接' : '未连接') : '未配置'
         }`
+        
         syncStatusItem.command = {
           command: 'starcode-snippets.openSettings',
           title: '打开云端同步设置',

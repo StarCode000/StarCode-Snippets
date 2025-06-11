@@ -13,7 +13,7 @@ import { SettingsManager } from './utils/settingsManager'
 import { CloudSyncManager } from './utils/cloudSyncManager'
 import { AutoSyncManager } from './utils/autoSyncManager'
 import { ContextManager } from './utils/contextManager'
-import { SyncStatusManager } from './utils/syncStatusManager'
+// import { GitStandardStatusManager } from './utils/gitStandardStatusManager' // 【移除】多余的Git状态栏
 import { StorageStrategyFactory, V1StorageStrategy, V2StorageStrategy } from './utils/storageStrategy'
 import { StorageContext } from './utils/storageContext'
 import { PathBasedManager } from './utils/pathBasedManager'
@@ -31,6 +31,7 @@ import { registerTestGiteeAuthMethodsCommand } from './commands/testGiteeAuthMet
 import { registerClearGitCredentialsCommand } from './commands/clearGitCredentials'
 import { registerReconfigureGitRemoteCommand } from './commands/reconfigureGitRemote'
 import { PathUtils } from './utils/pathUtils'
+import { FileSystemManager } from './utils/sync/fileSystemManager'
 
 /**
  * 确保配置已正确注册，修复插件更新后可能出现的配置注册问题
@@ -334,6 +335,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // 创建标准组件
     const searchManager = new SearchManager()
     const treeDataProvider = new SnippetsTreeDataProvider(storageManager, searchManager)
+    
+    // 设置TreeDataProvider的扩展上下文以启用详细状态管理
+    treeDataProvider.setContext(context)
 
     // 添加在注册命令前，注册迁移命令
     context.subscriptions.push(...registerMigrateCommands(context, storageContext))
@@ -359,6 +363,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(registerConflictMergeCommand(context, storageManager))
   context.subscriptions.push(registerTestMultiPlatformStorageCommand(context))
   context.subscriptions.push(registerDiagnoseConfigPermissionsCommand(context))
+  
+  // 注册新的合并冲突解决命令
+  const { ResolveMergeConflictCommand, CompleteMergeCommand } = require('./commands/resolveMergeConflictCommand')
+  context.subscriptions.push(
+    vscode.commands.registerCommand('starcode-snippets.resolveMergeConflict', () => ResolveMergeConflictCommand.execute(context))
+  )
+  context.subscriptions.push(
+    vscode.commands.registerCommand('starcode-snippets.completeMerge', () => CompleteMergeCommand.execute(context))
+  )
+  
+  // 注册清理未完成合并状态的命令
+  const { clearUnfinishedMergeCommand } = require('./commands/clearUnfinishedMergeCommand')
+  context.subscriptions.push(
+    vscode.commands.registerCommand('starcode-snippets.clearUnfinishedMerge', clearUnfinishedMergeCommand)
+  )
     
     // 注册测试命令（仅在开发环境或调试模式下）
     const { registerTestCommands } = require('./commands/testCommand')
@@ -368,9 +387,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // console.log('创建自动同步管理器...')
     const autoSyncManager = new AutoSyncManager(context, storageManager)
 
-    // 初始化同步状态管理器
-    // console.log('初始化同步状态管理器...')
-    const syncStatusManager = SyncStatusManager.getInstance(context)
+    // 初始化Git标准状态管理器
+    // console.log('初始化Git标准状态管理器...')
+    // const gitStatusManager = GitStandardStatusManager.getInstance(context) // 【移除】多余的Git状态栏
 
     // 设置自动同步管理器的刷新回调
     autoSyncManager.setRefreshCallback(() => {
@@ -458,7 +477,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       context.subscriptions.push({
         dispose: () => {
           autoSyncManager.dispose()
-          syncStatusManager.dispose()
+          // gitStatusManager.dispose() // 【移除】多余的Git状态栏
         },
       })
 
@@ -485,6 +504,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     })
     context.subscriptions.push(configurationChangeListener)
+
+    // 【新增】添加编辑器关闭事件监听器，自动处理冲突解决后的操作
+    const { createConflictResolutionListener } = require('./utils/conflictResolutionListener')
+    const conflictListener = createConflictResolutionListener(context, storageManager, autoSyncManager)
+    context.subscriptions.push(conflictListener)
 
     // 延迟启动自动同步（如果配置了的话）
     setTimeout(() => {
@@ -1730,97 +1754,71 @@ function registerCommands(
         return
       }
 
-      // 使用进度条显示同步过程
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: '云端同步',
-          cancellable: false,
-        },
-        async (progress) => {
-          progress.report({ increment: 0, message: '正在检查本地变更...' })
+      // 执行同步（详细状态会在树视图中显示）
+      const [snippets, directories] = await Promise.all([
+        storageManager.getAllSnippets(),
+        storageManager.getAllDirectories(),
+      ])
 
-          const [snippets, directories] = await Promise.all([
-            storageManager.getAllSnippets(),
-            storageManager.getAllDirectories(),
-          ])
+      const result = await cloudSyncManager.sync(snippets, directories)
 
-          progress.report({ increment: 30, message: '正在与云端同步...' })
-
-          const result = await cloudSyncManager.performSync(snippets, directories)
-
-          progress.report({ increment: 100, message: '同步完成' })
-
-          if (result.success) {
-            // 检查是否有自动合并的数据需要导入到VSCode
-            if (result.message.includes('自动合并')) {
-              try {
-                // 读取Git仓库中的最新数据
-                const { snippets: latestSnippets, directories: latestDirectories } = await cloudSyncManager.readDataFromGitRepo()
-                
-                // 计算新增的数据（远程数据减去原本地数据）
-                // V2格式：使用fullPath作为唯一标识符
-                const originalSnippetPaths = new Set(snippets.map(s => s.fullPath))
-                const originalDirPaths = new Set(directories.map(d => d.fullPath))
-                
-                const newSnippets = latestSnippets.filter(s => !originalSnippetPaths.has(s.fullPath))
-                const newDirectories = latestDirectories.filter(d => !originalDirPaths.has(d.fullPath))
-                
-                if (newSnippets.length > 0 || newDirectories.length > 0) {
-                  // 导入新数据到VSCode存储
-                  for (const directory of newDirectories) {
-                    await storageManager.createDirectory(directory)
-                  }
-                  
-                  for (const snippet of newSnippets) {
-                    await storageManager.saveSnippet(snippet)
-                  }
-                  
-                  // 显示包含导入信息的成功消息
-                  vscode.window.showInformationMessage(
-                    `✅ ${result.message}\n\n🎉 已自动导入 ${newSnippets.length} 个代码片段和 ${newDirectories.length} 个目录到VSCode`
-                  )
-                } else {
-                  vscode.window.showInformationMessage(`✅ ${result.message}`)
-                }
-              } catch (importError) {
-                console.warn('自动导入合并数据失败:', importError)
-                vscode.window.showInformationMessage(`✅ ${result.message}\n\n⚠️ 自动导入数据时出现问题，请手动刷新或使用"导入代码片段"功能`)
+      if (result.success) {
+        // 检查是否有自动合并的数据需要导入到VSCode
+        if (result.message.includes('自动合并')) {
+          try {
+            // 读取Git仓库中的最新数据
+            const { snippets: latestSnippets, directories: latestDirectories } = await cloudSyncManager.readDataFromGitRepo()
+            
+            // 计算新增的数据（远程数据减去原本地数据）
+            // V2格式：使用fullPath作为唯一标识符
+            const originalSnippetPaths = new Set(snippets.map(s => s.fullPath))
+            const originalDirPaths = new Set(directories.map(d => d.fullPath))
+            
+            const newSnippets = latestSnippets.filter(s => !originalSnippetPaths.has(s.fullPath))
+            const newDirectories = latestDirectories.filter(d => !originalDirPaths.has(d.fullPath))
+            
+            if (newSnippets.length > 0 || newDirectories.length > 0) {
+              // 导入新数据到VSCode存储
+              for (const directory of newDirectories) {
+                await storageManager.createDirectory(directory)
               }
+              
+              for (const snippet of newSnippets) {
+                await storageManager.saveSnippet(snippet)
+              }
+              
+              // 显示包含导入信息的成功消息
+              vscode.window.showInformationMessage(
+                `✅ ${result.message}\n\n🎉 已自动导入 ${newSnippets.length} 个代码片段和 ${newDirectories.length} 个目录到VSCode`
+              )
             } else {
-            vscode.window.showInformationMessage(`✅ 同步成功: ${result.message}`)
+              vscode.window.showInformationMessage(`✅ ${result.message}`)
             }
-            refreshTreeView()
-          } else {
-            vscode.window.showErrorMessage(`❌ 同步失败: ${result.message}`)
+          } catch (importError) {
+            console.warn('自动导入合并数据失败:', importError)
+            vscode.window.showInformationMessage(`✅ ${result.message}\n\n⚠️ 自动导入数据时出现问题，请手动刷新或使用"导入代码片段"功能`)
           }
+        } else {
+          vscode.window.showInformationMessage(`✅ 同步成功: ${result.message}`)
         }
-      )
+        refreshTreeView()
+      } else {
+        vscode.window.showErrorMessage(`❌ 同步失败: ${result.message}`)
+      }
     } catch (error) {
       console.error('手动同步失败:', error)
       vscode.window.showErrorMessage(`❌ 手动同步失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
   })
 
-  // 注册同步状态查看命令
+  // 注册Git标准状态查看命令
   const showSyncStatus = vscode.commands.registerCommand('starcode-snippets.showSyncStatus', async () => {
     try {
-      const syncStatusManager = SyncStatusManager.getInstance(context)
-      const report = syncStatusManager.generateSyncReport()
-
-      // 创建临时文档显示报告
-      const doc = await vscode.workspace.openTextDocument({
-        content: report,
-        language: 'markdown',
-      })
-
-      await vscode.window.showTextDocument(doc, {
-        viewColumn: vscode.ViewColumn.Beside,
-        preview: true,
-      })
+      // 【移除】多余的Git状态栏，改为显示云同步状态
+      vscode.window.showInformationMessage('Git状态栏已移除，请使用树视图中的同步状态查看功能')
     } catch (error) {
-      console.error('获取同步状态失败:', error)
-      vscode.window.showErrorMessage(`获取同步状态失败: ${error instanceof Error ? error.message : '未知错误'}`)
+      console.error('获取Git状态失败:', error)
+      vscode.window.showErrorMessage(`获取Git状态失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
   })
 
@@ -2231,6 +2229,8 @@ function registerCommands(
     }
   })
 
+  // 【已删除】测试真实文件存储系统命令 - 清理测试命令
+
   // 返回所有注册的命令
   return [
     refreshExplorer,
@@ -2266,6 +2266,7 @@ function registerCommands(
     forcePushToCloud,
     forceImportFromGitRepo,
     applyResolvedConflicts,
+    // testRealFileStorage, // 【已删除】测试命令
   ]
 }
 

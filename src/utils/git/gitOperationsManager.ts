@@ -212,28 +212,33 @@ export class GitOperationsManager {
   }
 
   /**
-   * 执行Git拉取操作（完整的原始逻辑）
+   * Git拉取操作（智能处理非快进和历史不相关问题）
    */
   public async gitPull(branch?: string): Promise<void> {
     const git = await this.getGitInstance()
     const targetBranch = branch || this.config.defaultBranch || 'main'
     
     try {
-      // 先检查本地状态
+      // 检查是否有本地更改
       const status = await git.status()
-      const hasUncommittedChanges = status.files.length > 0
+      const hasLocalChanges = status.files.length > 0
       
-      if (hasUncommittedChanges) {
-        // 检测到未提交的本地更改，使用智能合并策略
-        
-        // 暂存当前更改
-        await git.stash(['push', '-m', 'Auto-stash before sync'])
-        
+      if (hasLocalChanges) {
+        console.log('⚠️ 检测到本地更改，先暂存...')
+        // 暂存本地更改
         try {
-          // 拉取远程更改
+          await git.stash(['push', '-m', 'Auto-stash before pull'])
+        } catch (stashError) {
+          const stashErrorMsg = stashError instanceof Error ? stashError.message : '未知错误'
+          throw new Error(`暂存本地更改失败: ${stashErrorMsg}`)
+        }
+
+        // 尝试拉取
+        try {
           await git.pull('origin', targetBranch)
+          console.log('✅ 拉取成功，恢复本地更改...')
           
-          // 尝试恢复暂存的更改
+          // 拉取成功后，恢复暂存的更改
           try {
             await git.stash(['pop'])
           } catch (stashPopError) {
@@ -249,9 +254,11 @@ export class GitOperationsManager {
           
           // 处理 "refusing to merge unrelated histories" 错误
           if (pullErrorMessage.includes('refusing to merge unrelated histories')) {
+            console.log('⚠️ 检测到不相关历史记录，使用--allow-unrelated-histories重试...')
             try {
               // 使用 --allow-unrelated-histories 选项重新拉取
               await git.pull('origin', targetBranch, ['--allow-unrelated-histories'])
+              console.log('✅ 使用--allow-unrelated-histories拉取成功')
               
               // 拉取成功后，尝试恢复暂存的更改
               try {
@@ -273,28 +280,10 @@ export class GitOperationsManager {
               }
               
               const retryErrorMessage = retryError instanceof Error ? retryError.message : '未知错误'
+              console.error('⚠️ 即使使用--allow-unrelated-histories也无法合并')
               
-              // 询问用户是否要重新初始化仓库
-              const shouldReinitialize = await vscode.window.showErrorMessage(
-                `Git历史冲突无法自动解决。这通常发生在本地仓库和远程仓库有不同的提交历史时。\n\n原始错误: ${pullErrorMessage}\n重试错误: ${retryErrorMessage}`,
-                { modal: true },
-                '重新初始化仓库',
-                '取消'
-              )
-              
-              if (shouldReinitialize === '重新初始化仓库') {
-                const reinitResult = await this.reinitializeRepository()
-                
-                if (reinitResult.success) {
-                  // 重新初始化成功，显示成功消息
-                  vscode.window.showInformationMessage(reinitResult.message)
-                  return // 成功处理，退出函数
-                } else {
-                  throw new Error(`重新初始化失败: ${reinitResult.message}`)
-                }
-              } else {
-                throw new Error(`拉取远程变更失败: 用户取消了重新初始化操作。\n\n建议：\n1. 检查远程仓库是否正确\n2. 手动删除本地仓库目录后重新同步\n3. 或者联系技术支持`)
-              }
+              // 提供更好的解决方案建议
+              throw new Error(`Git历史冲突无法自动解决：\n\n原因：本地仓库和远程仓库有不同的Git历史记录\n\n解决方案：\n1. 使用"重新初始化仓库"命令（推荐）\n2. 手动删除本地Git仓库目录后重新同步\n3. 或联系技术支持\n\n技术详情：\n原始错误: ${pullErrorMessage}\n重试错误: ${retryErrorMessage}`)
             }
           }
           
@@ -308,45 +297,36 @@ export class GitOperationsManager {
         }
       } else {
         // 没有本地更改，直接拉取
+        try {
         await git.pull('origin', targetBranch)
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '未知错误'
+          console.log('✅ 拉取成功（无本地更改）')
+        } catch (pullError) {
+          const errorMessage = pullError instanceof Error ? pullError.message : '未知错误'
       
       // 处理 "refusing to merge unrelated histories" 错误
       if (errorMessage.includes('refusing to merge unrelated histories')) {
+            console.log('⚠️ 检测到不相关历史记录，使用--allow-unrelated-histories重试...')
         try {
           // 使用 --allow-unrelated-histories 选项重新拉取
           await git.pull('origin', targetBranch, ['--allow-unrelated-histories'])
+              console.log('✅ 使用--allow-unrelated-histories拉取成功')
           return
         } catch (retryError) {
           const retryErrorMessage = retryError instanceof Error ? retryError.message : '未知错误'
-          
-          // 询问用户是否要重新初始化仓库
-          const shouldReinitialize = await vscode.window.showErrorMessage(
-            `Git历史冲突无法自动解决。这通常发生在本地仓库和远程仓库有不同的提交历史时。\n\n原始错误: ${errorMessage}\n重试错误: ${retryErrorMessage}`,
-            { modal: true },
-            '重新初始化仓库',
-            '取消'
-          )
-          
-          if (shouldReinitialize === '重新初始化仓库') {
-            const reinitResult = await this.reinitializeRepository()
-            
-            if (reinitResult.success) {
-              // 重新初始化成功，显示成功消息
-              vscode.window.showInformationMessage(reinitResult.message)
-              return // 成功处理，退出函数
-            } else {
-              throw new Error(`重新初始化失败: ${reinitResult.message}`)
+              console.error('⚠️ 即使使用--allow-unrelated-histories也无法合并')
+              
+              // 提供更好的解决方案建议
+              throw new Error(`Git历史冲突无法自动解决：\n\n原因：本地仓库和远程仓库有不同的Git历史记录\n\n解决方案：\n1. 使用"重新初始化仓库"命令（推荐）\n2. 手动删除本地Git仓库目录后重新同步\n3. 或联系技术支持\n\n技术详情：\n原始错误: ${errorMessage}\n重试错误: ${retryErrorMessage}`)
             }
-          } else {
-            throw new Error(`拉取远程变更失败: 用户取消了重新初始化操作。\n\n建议：\n1. 检查远程仓库是否正确\n2. 手动删除本地仓库目录后重新同步\n3. 或者联系技术支持`)
           }
+          
+          throw new Error(`拉取远程变更失败: ${errorMessage}`)
         }
       }
-      
-      throw new Error(`拉取远程变更失败: ${errorMessage}`)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      console.error('❌ Git拉取操作失败:', errorMessage)
+      throw error
     }
   }
 
@@ -381,7 +361,7 @@ export class GitOperationsManager {
   }
 
   /**
-   * 推送到远程仓库
+   * 推送到远程仓库（智能处理非快进推送）
    */
   public async gitPush(branch?: string): Promise<void> {
     const git = await this.getGitInstance()
@@ -390,7 +370,49 @@ export class GitOperationsManager {
     try {
       await git.push('origin', targetBranch)
     } catch (error) {
-      throw new Error(`推送失败: ${error}`)
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      
+      // 【新增】处理没有上游分支的情况
+      if (errorMessage.includes('no upstream branch') || 
+          errorMessage.includes('has no upstream branch')) {
+        console.log('🔧 检测到没有上游分支，设置上游分支并推送...')
+        try {
+          await git.push(['--set-upstream', 'origin', targetBranch])
+          console.log('✅ 已设置上游分支并推送成功')
+          return
+        } catch (upstreamError) {
+          console.error('设置上游分支推送失败:', upstreamError)
+          throw new Error(`推送失败: ${upstreamError instanceof Error ? upstreamError.message : '未知错误'}`)
+        }
+      }
+      
+      // 处理非快进推送错误
+      if (errorMessage.includes('non-fast-forward') || 
+          errorMessage.includes('rejected') ||
+          errorMessage.includes('tip of your current branch is behind')) {
+        console.log('⚠️ 检测到非快进推送，尝试先拉取远程更改...')
+        
+        try {
+          // 先拉取远程更改
+          await this.gitPull(targetBranch)
+          
+          // 重新尝试推送
+          console.log('🔄 重新尝试推送...')
+          await git.push('origin', targetBranch)
+          console.log('✅ 推送成功')
+        } catch (retryError) {
+          const retryErrorMessage = retryError instanceof Error ? retryError.message : '未知错误'
+          
+          // 如果拉取后仍然失败，可能是有冲突
+          if (retryErrorMessage.includes('conflict') || retryErrorMessage.includes('CONFLICT')) {
+            throw new Error(`推送失败：检测到合并冲突。请手动解决冲突后重新同步。\n\n详细信息：${retryErrorMessage}`)
+          }
+          
+          throw new Error(`推送失败：即使在拉取远程更改后仍然失败。\n\n原始错误：${errorMessage}\n重试错误：${retryErrorMessage}`)
+        }
+      } else {
+        throw new Error(`推送失败: ${errorMessage}`)
+      }
     }
   }
 
@@ -473,34 +495,56 @@ export class GitOperationsManager {
   }
 
   /**
-   * 检查远程仓库状态（来自原始performSync）
+   * 检查远程仓库状态（增强版本：添加文件内容验证）
    */
   public async checkRemoteRepositoryStatus(targetBranch: string): Promise<{ isRemoteEmpty: boolean; remotePullSuccess: boolean; remoteHasData: boolean }> {
     let isRemoteEmpty = false
     let remotePullSuccess = false
     let remoteHasData = false
 
+    console.log(`🔍 开始检查远程仓库状态 (分支: ${targetBranch})...`)
+
     try {
       const git = await this.getGitInstance()
       
-      // 首先检查远程是否有分支
+      // 【增强】步骤1: 详细检查远程分支情况
+      console.log(`📡 正在检查远程分支信息...`)
       const remoteRefs = await git.listRemote(['--heads', 'origin'])
-      isRemoteEmpty = !remoteRefs || remoteRefs.trim() === ''
+      console.log(`   远程分支引用: ${remoteRefs ? remoteRefs.substring(0, 200) : 'null'}${remoteRefs && remoteRefs.length > 200 ? '...' : ''}`)
       
-      if (!isRemoteEmpty) {
-        // 远程不为空，尝试拉取并检查是否有数据
-        try {
-          await this.gitPull()
+      isRemoteEmpty = !remoteRefs || remoteRefs.trim() === ''
+      console.log(`   远程仓库是否为空: ${isRemoteEmpty}`)
+      
+      if (isRemoteEmpty) {
+        console.log(`✅ 确认远程仓库为空，这是首次推送场景`)
+        return { isRemoteEmpty: true, remotePullSuccess: false, remoteHasData: false }
+      }
+      
+      // 检查目标分支是否存在
+      const targetBranchExists = remoteRefs.includes(`refs/heads/${targetBranch}`)
+      console.log(`   目标分支 ${targetBranch} 是否存在: ${targetBranchExists}`)
+      
+      if (!targetBranchExists) {
+        console.log(`⚠️ 目标分支 ${targetBranch} 不存在于远程，将作为新分支处理`)
+        return { isRemoteEmpty: false, remotePullSuccess: false, remoteHasData: false }
+      }
+
+      // 【Git 标准】步骤2: 仅获取远程信息，不执行合并
+      console.log(`🔄 远程分支存在，开始获取并验证内容...`)
+      try {
+        // 只执行 fetch，不执行 pull（避免自动合并）
+        await this.gitFetch()
           remotePullSuccess = true
+        console.log(`✅ 远程获取成功`)
+        
+        // 【新增】步骤3: 深度验证远程数据内容
+        console.log(`🔍 开始验证远程数据文件内容...`)
+        remoteHasData = await this.validateRemoteDataContent(git, targetBranch)
+        console.log(`   远程数据验证结果: ${remoteHasData ? '有有效数据' : '无有效数据'}`)
           
-          // 拉取成功后，检查是否有实际的代码片段数据
-          // 注意：这里需要FileSystemManager来读取数据，但为了避免循环依赖，
-          // 我们只检查基本的Git状态，具体的数据检查由调用方处理
-          console.log('远程拉取成功，需要调用方检查数据内容')
-          remoteHasData = true // 假设有数据，由调用方进一步验证
-          
-        } catch (pullError) {
-          const errorMessage = pullError instanceof Error ? pullError.message : '未知错误'
+      } catch (fetchError) {
+        const errorMessage = fetchError instanceof Error ? fetchError.message : '未知错误'
+        console.error(`❌ 远程获取失败: ${errorMessage}`)
           
           // Gitee特殊错误处理
           if (this.config.provider === 'gitee') {
@@ -513,7 +557,7 @@ export class GitOperationsManager {
           if (errorMessage.includes('couldn\'t find remote ref') || 
               errorMessage.includes('does not exist') ||
               errorMessage.includes('no upstream branch')) {
-            console.log('远程分支不存在，将执行首次推送')
+          console.log('❌ 远程分支不存在，将执行首次推送')
             remotePullSuccess = false
           } else {
             // 检查是否是合并冲突
@@ -525,17 +569,143 @@ export class GitOperationsManager {
             } catch (statusError) {
               console.warn('检查Git状态失败:', statusError)
             }
-            throw pullError
-          }
+          throw fetchError
         }
       }
     } catch (remoteCheckError) {
-      console.warn('检查远程仓库状态失败:', remoteCheckError)
+      console.warn('❌ 检查远程仓库状态失败:', remoteCheckError)
       // 如果无法检查远程状态，假设为首次推送
       isRemoteEmpty = true
     }
 
+    console.log(`📊 远程仓库状态检查结果:`)
+    console.log(`   isRemoteEmpty: ${isRemoteEmpty}`)
+    console.log(`   remotePullSuccess: ${remotePullSuccess}`)
+    console.log(`   remoteHasData: ${remoteHasData}`)
+
     return { isRemoteEmpty, remotePullSuccess, remoteHasData }
+  }
+
+  /**
+   * 【新增】验证远程数据文件内容
+   * 不仅检查文件是否存在，还验证文件内容是否包含有效数据
+   */
+  private async validateRemoteDataContent(git: SimpleGit, targetBranch: string): Promise<boolean> {
+    try {
+      console.log(`🔍 验证远程数据文件内容（真实文件存储模式）...`)
+      
+      // 优先检查极简真实文件存储格式（纯代码文件，无元数据）
+      try {
+        // 获取远程仓库所有文件列表
+        const fileList = await git.raw(['ls-tree', '-r', '--name-only', `origin/${targetBranch}`])
+        const files = fileList.trim().split('\n').filter(f => f.trim())
+        
+        console.log(`   📁 远程仓库包含 ${files.length} 个文件`)
+        
+        if (files.length === 0) {
+          console.log(`   📋 远程仓库为空`)
+          return false
+        }
+        
+        // 过滤出真正的代码文件（排除特殊文件）
+        const codeFiles = files.filter(file => {
+          const fileName = file.split('/').pop() || ''
+          
+          // 排除系统文件、配置文件、文档文件
+          if (fileName.startsWith('.') || 
+              fileName === 'README.md' || 
+              fileName === 'LICENSE' ||
+              fileName.endsWith('.json')) {
+            return false
+          }
+          
+          // 检查是否为代码文件（有扩展名或特定命名模式）
+          return fileName.includes('.') || 
+                 /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(fileName)
+        })
+        
+        console.log(`   📄 检测到 ${codeFiles.length} 个代码文件`)
+        
+        // 统计目录数量
+        const directories = new Set<string>()
+        for (const file of codeFiles) {
+          const dirPath = file.split('/').slice(0, -1).join('/')
+          if (dirPath) {
+            directories.add(dirPath)
+          }
+        }
+        
+        console.log(`   📊 实际统计: ${codeFiles.length} 个代码片段文件, ${directories.size} 个目录`)
+        
+        // 只要有代码文件，就认为是极简真实文件存储格式
+        if (codeFiles.length > 0) {
+          console.log(`   ✅ 远程极简真实文件存储数据验证通过`)
+          return true
+        } else {
+          console.log(`   📋 远程仓库无有效代码文件`)
+          return false
+        }
+        
+      } catch (realFileError) {
+        console.log(`   🔄 未检测到真实文件存储格式，尝试兼容旧JSON格式...`)
+        
+        // 兼容旧的JSON存储格式
+        return await this.validateRemoteDataContentLegacy(git, targetBranch)
+      }
+      
+    } catch (error) {
+      console.error(`❌ 验证远程数据内容失败:`, error)
+      return false
+    }
+  }
+  
+  /**
+   * 验证远程数据内容（兼容旧JSON格式）
+   */
+  private async validateRemoteDataContentLegacy(git: SimpleGit, targetBranch: string): Promise<boolean> {
+    try {
+      console.log(`🔍 验证远程数据文件内容（兼容JSON格式）...`)
+      
+      // 尝试读取远程分支的snippets.json文件
+      let snippetsContent: string
+      try {
+        snippetsContent = await git.show([`origin/${targetBranch}:snippets.json`])
+        console.log(`   📄 snippets.json 内容长度: ${snippetsContent.length} 字符`)
+      } catch (snippetsError) {
+        console.log(`   ❌ 无法读取远程 snippets.json:`, snippetsError)
+        return false
+      }
+      
+      // 验证JSON格式
+      let snippetsData: any[]
+      try {
+        snippetsData = JSON.parse(snippetsContent)
+        console.log(`   ✅ snippets.json JSON解析成功`)
+      } catch (parseError) {
+        console.error(`   ❌ snippets.json JSON解析失败:`, parseError)
+        return false
+      }
+      
+      // 验证是否为数组
+      if (!Array.isArray(snippetsData)) {
+        console.error(`   ❌ snippets.json 不是数组格式:`, typeof snippetsData)
+        return false
+      }
+      
+      console.log(`   📊 远程代码片段数量: ${snippetsData.length}`)
+      
+      if (snippetsData.length === 0) {
+        console.log(`   📋 远程代码片段为空数组`)
+        return false
+      }
+      
+      console.log(`   ✅ 远程JSON数据验证通过: ${snippetsData.length} 个代码片段`)
+      return true
+      
+    } catch (error) {
+      console.error(`❌ 兼容模式验证失败:`, error)
+      return false
+    }
   }
 
   /**

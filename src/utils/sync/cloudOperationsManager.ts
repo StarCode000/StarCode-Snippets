@@ -6,6 +6,7 @@ import { SyncResult, PullResult, ForceImportResult, ConflictApplyResult } from '
 import { SettingsManager } from '../settingsManager'
 import { GitOperationsManager } from '../git/gitOperationsManager'
 import { FileSystemManager } from './fileSystemManager'
+// TODO: 简化冲突处理，使用Git标准检测器
 import { ConflictDetector } from '../conflict/conflictDetector'
 
 /**
@@ -79,25 +80,14 @@ export class CloudOperationsManager {
       }
       
       // 4. 备份当前的本地数据（如果存在）
-      const effectiveLocalPath = SettingsManager.getEffectiveLocalPath()
-      const backupDir = path.join(effectiveLocalPath, '.backup-pull-' + Date.now())
-      
       let hasLocalBackup = false
+      let backupDir = ''
       try {
-        const snippetsFile = path.join(effectiveLocalPath, 'snippets.json')
-        const directoriesFile = path.join(effectiveLocalPath, 'directories.json')
-        
-        if (fs.existsSync(snippetsFile) || fs.existsSync(directoriesFile)) {
-          fs.mkdirSync(backupDir, { recursive: true })
-          
-          if (fs.existsSync(snippetsFile)) {
-            fs.copyFileSync(snippetsFile, path.join(backupDir, 'snippets.json'))
-          }
-          if (fs.existsSync(directoriesFile)) {
-            fs.copyFileSync(directoriesFile, path.join(backupDir, 'directories.json'))
-          }
-          
+        const backupInfo = await this.fileSystemManager.createBackup()
+        if (backupInfo.success && backupInfo.backupDir) {
           hasLocalBackup = true
+          backupDir = backupInfo.backupDir
+          console.log(`已创建本地数据备份: ${backupDir}`)
         }
       } catch (backupError) {
         console.warn('备份本地数据失败:', backupError)
@@ -110,18 +100,14 @@ export class CloudOperationsManager {
         const errorMessage = pullError instanceof Error ? pullError.message : '未知错误'
         
         // 恢复备份（如果有）
-        if (hasLocalBackup) {
+        if (hasLocalBackup && backupDir) {
           try {
-            const snippetsBackup = path.join(backupDir, 'snippets.json')
-            const directoriesBackup = path.join(backupDir, 'directories.json')
-            
-            if (fs.existsSync(snippetsBackup)) {
-              fs.copyFileSync(snippetsBackup, path.join(effectiveLocalPath, 'snippets.json'))
+            const restoreResult = await this.fileSystemManager.restoreBackup(backupDir)
+            if (restoreResult.success) {
+              console.log('备份恢复成功')
+            } else {
+              console.warn('备份恢复失败')
             }
-            if (fs.existsSync(directoriesBackup)) {
-              fs.copyFileSync(directoriesBackup, path.join(effectiveLocalPath, 'directories.json'))
-            }
-            
             await this.fileSystemManager.cleanupBackup(backupDir)
           } catch (restoreError) {
             console.warn('恢复备份失败:', restoreError)
@@ -135,10 +121,10 @@ export class CloudOperationsManager {
       }
       
       // 6. 读取拉取的数据
-      const pulledData = await this.fileSystemManager.readDataFromGitRepo()
+      const pulledData = await this.fileSystemManager.readFromGit()
       
       // 7. 清理备份（拉取成功）
-      if (hasLocalBackup && fs.existsSync(backupDir)) {
+      if (hasLocalBackup && backupDir) {
         try {
           await this.fileSystemManager.cleanupBackup(backupDir)
         } catch (cleanupError) {
@@ -211,7 +197,7 @@ export class CloudOperationsManager {
       }
       
       // 3. 强制写入本地数据（始终更新时间戳）
-      await this.fileSystemManager.writeDataToGitRepo(currentSnippets, currentDirectories, true)
+      await this.fileSystemManager.writeToGit(currentSnippets, currentDirectories)
       
       // 4. 检查是否有变更需要提交
       const gitStatus = await this.gitOpsManager.gitStatus()
@@ -293,7 +279,7 @@ export class CloudOperationsManager {
 
     try {
       // 1. 从Git仓库读取最新数据
-      const gitData = await this.fileSystemManager.readDataFromGitRepo()
+      const gitData = await this.fileSystemManager.readFromGit()
       
       if (gitData.snippets.length === 0 && gitData.directories.length === 0) {
         return {
@@ -485,8 +471,10 @@ export class CloudOperationsManager {
         }
       }
       
-      // 清理临时文件
-      await this.fileSystemManager.cleanupTempConflictFiles(tempDir)
+      // 清理临时文件（极简文件存储模式：直接删除目录）
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+      }
       
       return {
         success: true,
