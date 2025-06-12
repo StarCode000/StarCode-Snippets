@@ -186,7 +186,7 @@ export class AutoSyncManager {
       ])
 
       // 执行同步
-      const result = await this.cloudSyncManager.performSync(snippets, directories)
+      const result = await this.cloudSyncManager.sync(snippets, directories)
 
       if (result.success) {
         const syncDuration = Date.now() - syncStartTime
@@ -333,7 +333,7 @@ export class AutoSyncManager {
         this.storageManager.getAllDirectories(),
       ])
 
-      const result = await this.cloudSyncManager.performSync(snippets, directories)
+      const result = await this.cloudSyncManager.sync(snippets, directories)
 
       if (result.success) {
         const syncDuration = Date.now() - syncStartTime

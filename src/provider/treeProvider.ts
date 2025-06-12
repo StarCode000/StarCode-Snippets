@@ -1,17 +1,18 @@
 import * as vscode from 'vscode'
 import { StorageManager } from '../storage/storageManager'
 import { StorageContext } from '../utils/storageContext'
-import { CodeSnippet, Directory, CodeSnippetV2, DirectoryV2 } from '../types/types'
+import { CodeSnippet, Directory } from '../types/types'
 import { SearchManager } from '../utils/searchManager'
 import { SettingsManager } from '../utils/settingsManager'
 import { PathBasedManager } from '../utils/pathBasedManager'
+import { DetailedSyncStatusManager } from '../utils/detailedSyncStatusManager'
 
 export class SnippetTreeItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly snippet?: CodeSnippet | CodeSnippetV2,
-    public readonly directory?: Directory | DirectoryV2,
+    public readonly snippet?: CodeSnippet,
+    public readonly directory?: Directory,
     public readonly isSearchResult?: boolean
   ) {
     super(label, collapsibleState)
@@ -63,23 +64,25 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
   readonly onDidChangeTreeData: vscode.Event<SnippetTreeItem | undefined | null | void> =
     this._onDidChangeTreeData.event
 
-  private _snippets: CodeSnippet[] | CodeSnippetV2[] = []
-  private _directories: Directory[] | DirectoryV2[] = []
+  private _snippets: CodeSnippet[] = []
+  private _directories: Directory[] = []
   private _initialized: boolean = false
   private _searchManager: SearchManager
   private _statusUpdateTimer: NodeJS.Timeout | undefined
   private _isV2Format: boolean = false
+  private _detailedStatusManager: DetailedSyncStatusManager | null = null
 
   constructor(private storageManager: StorageManager, searchManager: SearchManager) {
     this._searchManager = searchManager
 
     // 监听搜索变化
     this._searchManager.onDidChangeSearch(() => {
-      this.refresh()
+      // 搜索变化时只需要刷新，不需要重新加载数据
+      this._onDidChangeTreeData.fire()
     })
 
-    // 启动状态更新定时器（每5秒更新一次）
-    this._startStatusUpdateTimer() // 暂时禁用定时器避免干扰调试
+    // 启动状态更新定时器（每30秒更新一次）
+    this._startStatusUpdateTimer()
 
     // 立即加载数据
     this._loadData()
@@ -94,6 +97,19 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         this._initialized = true
         this._onDidChangeTreeData.fire()
       })
+  }
+
+  /**
+   * 设置扩展上下文以初始化详细状态管理器
+   */
+  public setContext(context: vscode.ExtensionContext): void {
+    this._detailedStatusManager = DetailedSyncStatusManager.getInstance(context)
+    
+    // 监听详细状态变化
+    this._detailedStatusManager.onStatusChange(() => {
+      // 状态变化时刷新树视图
+      this._onDidChangeTreeData.fire()
+    })
   }
 
   /**
@@ -283,8 +299,8 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     filteredSnippets?: any[],
     filteredDirectories?: any[]
   ): {
-    childDirs: (Directory | DirectoryV2)[]
-    childSnippets: (CodeSnippet | CodeSnippetV2)[]
+    childDirs: Directory[]
+    childSnippets: CodeSnippet[]
   } {
     // console.log(
     //   `getChildrenForDirectory 被调用: directoryId=${directoryId}, directoryPath=${directoryPath}, 当前格式=${
@@ -302,10 +318,10 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       // console.log(`V2格式处理: 使用标准化路径=${path} 进行过滤`)
 
       // 过滤子目录
-      const childDirs = (directories as DirectoryV2[]).filter((dir) => {
+      const childDirs = (directories as any[]).filter((dir: any) => {
         if (!path || path === '/') {
           // 根目录只显示一级目录
-          const pathParts = dir.fullPath.split('/').filter((p) => p.length > 0)
+          const pathParts = dir.fullPath.split('/').filter((p: string) => p.length > 0)
           const result = pathParts.length === 1
           if (result) {
             // console.log(`  根级目录匹配: ${dir.name}, fullPath=${dir.fullPath}`)
@@ -314,7 +330,7 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         } else {
           // 其他目录显示直接子目录
           // 确保目录的父路径与当前目录路径完全匹配
-          const dirSegments = dir.fullPath.split('/').filter((p) => p.length > 0)
+          const dirSegments = dir.fullPath.split('/').filter((p: string) => p.length > 0)
 
           if (dirSegments.length <= 1) {
             // 如果目录在根目录，不应该在子目录中显示
@@ -335,10 +351,10 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       })
 
       // 过滤子代码片段
-      const childSnippets = (snippets as CodeSnippetV2[]).filter((snippet) => {
+      const childSnippets = (snippets as any[]).filter((snippet: any) => {
         if (!path || path === '/') {
           // 根目录只显示没有路径的代码片段（直接在根目录下）
-          const pathParts = snippet.fullPath.split('/').filter((p) => p.length > 0)
+          const pathParts = snippet.fullPath.split('/').filter((p: string) => p.length > 0)
           const result = pathParts.length === 1
           if (result) {
             // console.log(`  根级片段匹配: ${snippet.name}, fullPath=${snippet.fullPath}`)
@@ -347,7 +363,7 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         } else {
           // 其他目录显示直接子代码片段
           // 确保snippet的父路径与当前目录路径完全匹配
-          const snippetSegments = snippet.fullPath.split('/').filter((p) => p.length > 0)
+          const snippetSegments = snippet.fullPath.split('/').filter((p: string) => p.length > 0)
 
           if (snippetSegments.length <= 1) {
             // 如果代码片段在根目录，不应该在子目录中显示
@@ -372,8 +388,8 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     } else {
       // V1格式：基于ID的数据结构
       // console.log(`V1格式处理: 使用parentId=${directoryId} 进行过滤`)
-      const childDirs = (directories as Directory[]).filter((dir) => dir.parentId === directoryId)
-      const childSnippets = (snippets as CodeSnippet[]).filter((snippet) => snippet.parentId === directoryId)
+      const childDirs = (directories as any[]).filter((dir: any) => dir.parentId === directoryId)
+      const childSnippets = (snippets as any[]).filter((snippet: any) => snippet.parentId === directoryId)
 
       // console.log(`V1格式结果: 找到 ${childDirs.length} 个子目录和 ${childSnippets.length} 个代码片段`)
       return { childDirs, childSnippets }
@@ -393,8 +409,8 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
     }
 
     // 应用搜索过滤
-    const filteredSnippets = this._searchManager.filterSnippets(this._snippets as any)
-    const filteredDirectories = this._searchManager.filterDirectories(this._directories as any, filteredSnippets as any)
+    const filteredSnippets = this._searchManager.filterSnippets(this._snippets)
+    const filteredDirectories = this._searchManager.filterDirectories(this._directories, filteredSnippets)
 
     if (!element) {
       // 根节点 - 显示所有顶级目录和代码片段
@@ -417,31 +433,41 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       {
         let statusText = ''
         let statusIcon = ''
+        let detailedTooltip = ''
 
         // 检查是否配置了同步
         const hasConfig = syncConfig.repositoryUrl && syncConfig.repositoryUrl.trim() !== ''
 
-        if (!hasConfig) {
-          statusText = '未配置云端同步'
-          statusIcon = 'cloud-offline'
-        } else if (syncStatus.isSyncing) {
-          statusText = '正在同步...'
-          statusIcon = 'sync~spin'
-        } else if (syncStatus.isConnected) {
-          if (syncStatus.lastSyncTime) {
-            statusText = this._generateSyncTimeText(syncStatus.lastSyncTime)
-          } else {
-            statusText = '已连接，未同步'
-          }
-          statusIcon = 'cloud'
+        // 优先使用详细状态管理器的信息
+        if (this._detailedStatusManager) {
+          const detailedStatus = this._detailedStatusManager.getCurrentStatus()
+          statusText = this._detailedStatusManager.getStatusBarText()
+          statusIcon = this._detailedStatusManager.getStatusIcon()
+          detailedTooltip = this._detailedStatusManager.getTooltip()
         } else {
-          statusText = '未连接'
-          statusIcon = 'cloud-offline'
-        }
+          // 回退到原有的状态显示逻辑
+          if (!hasConfig) {
+            statusText = '未配置云端同步'
+            statusIcon = 'cloud-offline'
+          } else if (syncStatus.isSyncing) {
+            statusText = '正在同步...'
+            statusIcon = 'sync~spin'
+          } else if (syncStatus.isConnected) {
+            if (syncStatus.lastSyncTime) {
+              statusText = this._generateSyncTimeText(syncStatus.lastSyncTime)
+            } else {
+              statusText = '已连接，未同步'
+            }
+            statusIcon = 'cloud'
+          } else {
+            statusText = '未连接'
+            statusIcon = 'cloud-offline'
+          }
 
-        if (syncStatus.lastError) {
-          statusText += ` (错误)`
-          statusIcon = 'warning'
+          if (syncStatus.lastError && syncStatus.lastError.trim() !== '') {
+            statusText += ` (错误)`
+            statusIcon = 'warning'
+          }
         }
         
         // 显示平台名称
@@ -465,9 +491,12 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
         const syncStatusItem = new SnippetTreeItem(statusText, vscode.TreeItemCollapsibleState.None)
         syncStatusItem.contextValue = 'syncStatus'
         syncStatusItem.iconPath = new vscode.ThemeIcon(statusIcon)
-        syncStatusItem.tooltip = `点击打开云端同步设置\n\n平台: ${hasConfig ? platformName : '未配置'}\n仓库: ${syncConfig.repositoryUrl || '未配置'}\n状态: ${
+        
+        // 使用详细状态管理器的工具提示，如果没有则使用默认工具提示
+        syncStatusItem.tooltip = detailedTooltip || `点击打开云端同步设置\n\n平台: ${hasConfig ? platformName : '未配置'}\n仓库: ${syncConfig.repositoryUrl || '未配置'}\n状态: ${
           hasConfig ? (syncStatus.isConnected ? '已连接' : '未连接') : '未配置'
         }`
+        
         syncStatusItem.command = {
           command: 'starcode-snippets.openSettings',
           title: '打开云端同步设置',
@@ -490,7 +519,19 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
       }
 
       // 获取根级别的目录和代码片段
-      const { childDirs: rootDirs, childSnippets: rootSnippets } = this.getChildrenForDirectory(undefined, '/', filteredSnippets, filteredDirectories)
+      let rootDirs: any[] = []
+      let rootSnippets: any[] = []
+
+      if (this._searchManager.isActive) {
+        // 搜索模式：显示所有匹配的代码片段，不按目录层级过滤
+        rootSnippets = filteredSnippets
+        rootDirs = filteredDirectories
+      } else {
+        // 正常模式：只显示根级别的目录和代码片段
+        const children = this.getChildrenForDirectory(undefined, '/', filteredSnippets, filteredDirectories)
+        rootDirs = children.childDirs
+        rootSnippets = children.childSnippets
+      }
 
       // 添加根级别的目录
       rootDirs
@@ -531,12 +572,12 @@ export class SnippetsTreeDataProvider implements vscode.TreeDataProvider<Snippet
 
       if (this._isV2Format) {
         // 在V2格式下，使用目录的fullPath作为路径，并标准化
-        const rawPath = (element.directory as DirectoryV2).fullPath
+        const rawPath = (element.directory as any).fullPath
         directoryPath = this.normalizeV2Path(rawPath)
-        // console.log(`处理V2目录: ${(element.directory as DirectoryV2).name}, 原始路径=${rawPath}, 标准化路径=${directoryPath}`)
+        // console.log(`处理V2目录: ${(element.directory as any).name}, 原始路径=${rawPath}, 标准化路径=${directoryPath}`)
       } else {
         // 在V1格式下，使用目录的ID
-        directoryId = (element.directory as Directory).id
+        directoryId = (element.directory as any).id
       }
 
       // 获取该目录的子目录和代码片段

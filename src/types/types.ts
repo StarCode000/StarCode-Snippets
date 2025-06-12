@@ -40,9 +40,13 @@ export interface DirectoryV2 {
   order: number
 }
 
-// ===== 当前使用的类型别名（指向V1以保持兼容性） =====
-export type CodeSnippet = CodeSnippetV1
-export type Directory = DirectoryV1
+// ===== 已弃用的类型别名（指向V1） =====
+export type CodeSnippetDeprecatedType = CodeSnippetV1
+export type DirectoryDeprecatedType = DirectoryV1
+
+// ===== 当前使用的类型别名（指向V2） =====
+export type CodeSnippet = CodeSnippetV2
+export type Directory = DirectoryV2
 
 // ===== 导出数据格式 =====
 export interface ExportDataV1 {
@@ -104,4 +108,84 @@ export interface MultiPlatformCloudSyncConfig {
   autoSync: boolean // 是否启用自动同步
   syncInterval: number // 自动同步间隔（分钟）
   activeConfigId: string | null // 当前激活的配置ID
+}
+
+// ===== 管理器接口定义 =====
+
+/**
+ * 存储管理器接口
+ */
+export interface IStorageManager {
+  getAllSnippets(): Promise<CodeSnippet[]>
+  getAllDirectories(): Promise<Directory[]>
+  saveSnippet(snippet: CodeSnippet): Promise<void>
+  updateSnippet(snippet: CodeSnippet): Promise<void>
+  deleteSnippet(fullPath: string): Promise<void>
+  createDirectory(directory: Directory): Promise<void>
+  updateDirectory(directory: Directory): Promise<void>
+  deleteDirectory(fullPath: string): Promise<void>
+  clearCache?(): void
+  exportAllData?(): Promise<{ snippets: CodeSnippet[], directories: Directory[] }>
+}
+
+/**
+ * Git状态文件接口
+ */
+export interface GitStatusFile {
+  path: string
+  working_dir: string
+  index: string
+}
+
+/**
+ * Git状态结果接口
+ */
+export interface GitStatusResult {
+  files: GitStatusFile[]
+  staged: string[]
+  not_added: string[]
+  conflicted: string[]
+  created: string[]
+  deleted: string[]
+  modified: string[]
+  renamed: string[]
+}
+
+/**
+ * Git操作管理器接口
+ */
+export interface IGitOperationsManager {
+  getGitInstance(): Promise<any>
+  gitStatus(): Promise<GitStatusResult>
+  gitAddAll(): Promise<void>
+  gitCommit(message: string): Promise<void>
+  gitPush(branch?: string): Promise<void>
+  gitPull(branch?: string): Promise<void>
+  gitFetch(): Promise<void>
+  checkRemoteUpdates(): Promise<{ hasUpdates: boolean; details: string }>
+  checkRemoteRepositoryStatus(targetBranch: string): Promise<{ 
+    isRemoteEmpty: boolean
+    remotePullSuccess: boolean
+    remoteHasData: boolean 
+  }>
+  generateCommitMessage(): string
+}
+
+/**
+ * 文件系统管理器接口
+ */
+export interface IFileSystemManager {
+  writeToGit(snippets: CodeSnippet[], directories: Directory[]): Promise<void>
+  readFromGit(): Promise<{ snippets: CodeSnippet[]; directories: Directory[] }>
+  createBackup(): Promise<{ success: boolean; backupDir?: string }>
+  restoreBackup(backupDir: string): Promise<{ success: boolean }>
+  cleanupBackup(backupDir: string): Promise<void>
+  fileExists(filePath: string): boolean
+  getFileModifiedTime(filePath: string): number
+  ensureDirectoryExists(dirPath: string): void
+  calculateHash(content: string): string
+  hasSnippetContentDifference(local: CodeSnippet, remote: CodeSnippet): boolean
+  hasDirectoryContentDifference(local: Directory, remote: Directory): boolean
+  cleanupOldFiles(): Promise<void>
+  testPureFileStorage(): Promise<{ success: boolean; message: string }>
 }

@@ -271,26 +271,26 @@ export class SettingsWebviewProvider {
   
   // 测试Git平台配置连接
   private async _testPlatformConnection(config: GitPlatformConfig, panel: vscode.WebviewPanel) {
-    // console.log('开始平台配置连接测试...')
+    // console.log('开始连接测试...')
     try {
       panel.webview.postMessage({
-        type: 'testingConnection',
+        type: 'platformTestStarted',
         configId: config.id,
         message: '正在测试连接...',
       })
-      
-      // 转换为传统配置格式进行测试
+
+      // 转换为CloudSyncConfig格式
       const legacyConfig: CloudSyncConfig = {
         provider: config.provider,
         repositoryUrl: config.repositoryUrl,
         token: config.token,
-        localPath: config.localPath || PathUtils.getDefaultLocalRepoPath(),
+        localPath: config.localPath,
         defaultBranch: config.defaultBranch,
         authenticationMethod: config.authenticationMethod,
         sshKeyPath: config.sshKeyPath,
-        autoSync: false, // 这些不影响连接测试
-        syncInterval: 15,
-        commitMessageTemplate: config.commitMessageTemplate
+        commitMessageTemplate: config.commitMessageTemplate,
+        autoSync: false, // 测试时不需要
+        syncInterval: 15, // 默认值
       }
 
       // 使用CloudSyncManager进行真实连接测试
@@ -300,7 +300,11 @@ export class SettingsWebviewProvider {
         throw new Error('扩展上下文未初始化')
       }
 
-      const cloudSyncManager = new CloudSyncManager(context)
+      // 为连接测试创建StorageManager实例
+      const { StorageManager } = await import('../storage/storageManager')
+      const storageManager = new StorageManager(context)
+
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
       cloudSyncManager.updateConfig(legacyConfig) // 使用转换后的配置
 
       // console.log('调用testConnection方法...')
@@ -405,7 +409,11 @@ export class SettingsWebviewProvider {
         throw new Error('扩展上下文未初始化')
       }
 
-      const cloudSyncManager = new CloudSyncManager(context)
+      // 为连接测试创建StorageManager实例
+      const { StorageManager } = await import('../storage/storageManager')
+      const storageManager = new StorageManager(context)
+
+      const cloudSyncManager = new CloudSyncManager(context, storageManager)
       cloudSyncManager.updateConfig(config) // 使用最新配置
 
       // console.log('调用testConnection方法...')
@@ -528,13 +536,46 @@ export class SettingsWebviewProvider {
       // 获取同步状态
     const status = SettingsManager.getCloudSyncStatus()
 
-      // 获取本地路径描述
+      // 获取本地路径描述 - 使用编辑器特定路径
       const localPathDescription = SettingsManager.getLocalPathDescription()
       const isUsingDefaultPath = SettingsManager.isUsingDefaultPath()
-      const defaultLocalPath = PathUtils.getDefaultLocalRepoPath()
+      const defaultLocalPath = PathUtils.getEditorSpecificRepoPath(undefined, SettingsManager.getExtensionContext() || undefined)
+      
+      // 获取所有平台的实际解析路径 - 使用编辑器特定路径
+      const platformPaths: { [provider: string]: string } = {}
+      const extensionContext = SettingsManager.getExtensionContext() || undefined
+      if (multiConfig.platforms) {
+        multiConfig.platforms.forEach(platform => {
+          const resolvedPath = PathUtils.resolveDefaultPathToken(
+            platform.localPath || '', 
+            platform.provider, 
+            extensionContext
+          )
+          platformPaths[platform.provider] = resolvedPath
+        })
+      }
+      
+      // 如果有激活平台，也添加其路径
+      if (activePlatform) {
+        const resolvedPath = PathUtils.resolveDefaultPathToken(
+          activePlatform.localPath || '', 
+          activePlatform.provider, 
+          extensionContext
+        )
+        platformPaths[activePlatform.provider] = resolvedPath
+      }
       
       // 检查多平台路径冲突
       const pathConflicts = PathUtils.checkPathConflicts(multiConfig.platforms)
+      
+      // 检查是否有配置在读取时被自动调整了路径
+      const hasAutoAdjustedPaths = multiConfig.platforms.some(platform => 
+        platform.localPath && (
+          platform.localPath === 'GITHUB_DEFAULT_REPO' || 
+          platform.localPath === 'GITLAB_DEFAULT_REPO' || 
+          platform.localPath === 'GITEE_DEFAULT_REPO'
+        )
+      )
       
       // 发送所有配置数据到WebView
     panel.webview.postMessage({
@@ -546,7 +587,9 @@ export class SettingsWebviewProvider {
         localPathDescription: localPathDescription,
         isUsingDefaultPath: isUsingDefaultPath,
         defaultLocalPath: defaultLocalPath,
-        pathConflicts: pathConflicts
+        pathConflicts: pathConflicts,
+        hasAutoAdjustedPaths: hasAutoAdjustedPaths,
+        platformPaths: platformPaths // 添加解析后的实际路径
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载配置时发生错误'
@@ -574,13 +617,15 @@ export class SettingsWebviewProvider {
       // 使用StorageContext来获取正确版本的数据
       const { StorageStrategyFactory } = await import('../utils/storageStrategy')
       const { StorageContext } = await import('../utils/storageContext')
+      const { StorageManager } = await import('../storage/storageManager')
       
       const storageStrategy = StorageStrategyFactory.createStrategy(context)
       const storageContext = new StorageContext(storageStrategy)
+      const storageManager = new StorageManager(context)
       
       // console.log(`手动同步使用存储版本: ${storageContext.getVersion()}`)
       
-      const cloudSyncManager = new CloudSyncManager(context, null) // 传递null，CloudSyncManager不直接使用storageManager
+      const cloudSyncManager = new CloudSyncManager(context, storageManager) // 传递storageManager以支持智能合并
 
       const [snippets, directories] = await Promise.all([
         storageContext.getAllSnippets(),
@@ -589,7 +634,7 @@ export class SettingsWebviewProvider {
 
       // console.log(`手动同步获取到数据: ${snippets.length} 个代码片段, ${directories.length} 个目录`)
 
-      const result = await cloudSyncManager.performSync(snippets, directories)
+      const result = await cloudSyncManager.sync(snippets, directories)
 
       panel.webview.postMessage({
         type: 'manualSyncResult',
@@ -902,6 +947,9 @@ export class SettingsWebviewProvider {
       let notificationMessage = `设置已从 ${uris[0].fsPath} 导入成功`
       let importedPlatformsCount = 0
       let hasCredentials = false
+      
+      // 声明路径处理结果变量，以便在不同作用域中使用
+      let pathProcessingResults: Array<{ platform: string; wasModified: boolean; reason?: string }> = []
 
       // 根据版本号处理不同格式的配置文件
       const version = parseFloat(importData.version)
@@ -928,11 +976,22 @@ export class SettingsWebviewProvider {
             
             for (const platform of multiConfig.platforms) {
               if (platform.provider && ['github', 'gitlab', 'gitee'].includes(platform.provider)) {
+                // 智能处理导入的路径，检查跨平台兼容性
+                const pathResult = PathUtils.processImportedPath(platform.localPath, platform.provider)
+                
+                if (pathResult.wasModified) {
+                  pathProcessingResults.push({
+                    platform: platform.provider,
+                    wasModified: true,
+                    reason: pathResult.reason
+                  })
+                }
+
                 platformConfigs[platform.provider] = {
                   provider: platform.provider,
                   repositoryUrl: platform.repositoryUrl || '',
                   token: platform.token || '',
-                  localPath: platform.localPath || '',
+                  localPath: pathResult.processedPath,
                   defaultBranch: platform.defaultBranch || 'main',
                   authenticationMethod: platform.authenticationMethod || 'token',
                   sshKeyPath: platform.sshKeyPath || '',
@@ -941,6 +1000,19 @@ export class SettingsWebviewProvider {
                   syncInterval: multiConfig.syncInterval || 15,
                 }
               }
+            }
+
+            // 如果有路径被修改，通知用户
+            if (pathProcessingResults.length > 0) {
+              const modifiedPlatforms = pathProcessingResults.map(result => {
+                const platformName = result.platform.charAt(0).toUpperCase() + result.platform.slice(1)
+                return `${platformName}: ${result.reason}`
+              }).join('\n')
+              
+              vscode.window.showWarningMessage(
+                `跨平台兼容性检查：部分平台的本地路径已调整为默认路径\n\n${modifiedPlatforms}`,
+                '我知道了'
+              )
             }
 
             // 批量保存平台配置
@@ -978,6 +1050,10 @@ export class SettingsWebviewProvider {
             importMessage += '（包含访问凭据）'
             notificationMessage += '，包含访问凭据'
           }
+
+          if (pathProcessingResults.length > 0) {
+            notificationMessage += `\n\n🔄 已自动调整 ${pathProcessingResults.length} 个平台的本地路径以兼容当前操作系统`
+          }
         }
 
       } else if (version >= 2.0) {
@@ -995,18 +1071,35 @@ export class SettingsWebviewProvider {
         } else if (isGitConfig) {
           hasCredentials = !!(configData.token || configData.sshKeyPath)
           
+          // 智能处理导入的路径，检查跨平台兼容性
+          const pathResult = PathUtils.processImportedPath(
+            configData.localPath,
+            configData.provider as 'github' | 'gitlab' | 'gitee'
+          )
+          
           const currentConfig = SettingsManager.getCloudSyncConfig()
           const newConfig = {
             provider: configData.provider || currentConfig.provider || '',
             repositoryUrl: configData.repositoryUrl || currentConfig.repositoryUrl || '',
             token: configData.token || currentConfig.token || '',
-            localPath: configData.localPath || currentConfig.localPath || '',
+            localPath: pathResult.processedPath || currentConfig.localPath || '',
             defaultBranch: configData.defaultBranch || currentConfig.defaultBranch || 'main',
             authenticationMethod: configData.authenticationMethod || currentConfig.authenticationMethod || 'token',
             sshKeyPath: configData.sshKeyPath || currentConfig.sshKeyPath || '',
             autoSync: configData.autoSync !== undefined ? configData.autoSync : currentConfig.autoSync || false,
             syncInterval: configData.syncInterval || currentConfig.syncInterval || 15,
             commitMessageTemplate: configData.commitMessageTemplate || currentConfig.commitMessageTemplate || 'Sync snippets: {timestamp}',
+          }
+
+          // 如果路径被修改，通知用户
+          if (pathResult.wasModified) {
+            const platformName = configData.provider ? 
+              configData.provider.charAt(0).toUpperCase() + configData.provider.slice(1) : 
+              '当前平台'
+            vscode.window.showWarningMessage(
+              `跨平台兼容性检查：${platformName} 的本地路径已调整为默认路径\n\n原因：${pathResult.reason}`,
+              '我知道了'
+            )
           }
 
           // 验证配置
@@ -1026,6 +1119,10 @@ export class SettingsWebviewProvider {
           } else {
             importMessage += '（未包含访问凭据，已保留当前设置）'
             notificationMessage += '\n\n⚠️ 导入的配置不包含访问凭据，已保留当前设置的凭据信息'
+          }
+
+          if (pathResult.wasModified) {
+            notificationMessage += '\n\n🔄 已自动调整本地路径以兼容当前操作系统'
           }
         } else {
           throw new Error('配置文件格式无法识别。请确保导入正确的配置文件。')
@@ -1048,6 +1145,46 @@ export class SettingsWebviewProvider {
       console.error('导入设置失败:', error)
       const errorMessage = error instanceof Error ? error.message : '导入设置失败'
 
+      // 如果是配置注册问题，尝试自动修复
+      if (errorMessage.includes('没有注册配置') || errorMessage.includes('starcode-snippets.multiPlatformCloudSync')) {
+        try {
+          console.log('检测到配置注册问题，正在尝试自动修复...')
+          
+          // 记录错误状态，用于后续自动检查
+          const context = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(''))?.name || 'global'
+          try {
+            const extensionContext = require('../utils/settingsManager').SettingsManager.getExtensionContext()
+            if (extensionContext) {
+              await extensionContext.globalState.update('lastConfigError', errorMessage)
+            }
+          } catch (stateError) {
+            console.warn('记录错误状态失败:', stateError)
+          }
+          
+          // 等待配置系统初始化
+          await this._waitForConfigurationAvailable()
+          
+          // 提示用户重试
+          const retryResult = await vscode.window.showWarningMessage(
+            '检测到插件配置系统正在初始化中。这是插件更新后的正常现象，请稍后重试导入操作。\n\n' +
+            '💡 提示：插件将在初始化完成后自动提醒您重试。',
+            '立即重试',
+            '稍后处理'
+          )
+          
+          if (retryResult === '立即重试') {
+            // 递归重试导入操作
+            setTimeout(() => {
+              this._importSettings(panel)
+            }, 1000)
+            return
+          }
+          
+        } catch (fixError) {
+          console.warn('自动修复配置注册问题失败:', fixError)
+        }
+      }
+
       panel.webview.postMessage({
         type: 'importResult',
         success: false,
@@ -1056,6 +1193,33 @@ export class SettingsWebviewProvider {
 
       vscode.window.showErrorMessage(`导入设置失败: ${errorMessage}`)
     }
+  }
+
+  /**
+   * 等待配置在VSCode中注册完成
+   */
+  private async _waitForConfigurationAvailable(maxWaitTime: number = 3000): Promise<void> {
+    const startTime = Date.now()
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const config = vscode.workspace.getConfiguration()
+        const configSchema = config.inspect('starcode-snippets.multiPlatformCloudSync')
+        
+        if (configSchema && configSchema.defaultValue !== undefined) {
+          // 配置已可用
+          return
+        }
+        
+        // 等待100ms后重试
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        // 忽略检查错误，继续等待
+      }
+    }
+    
+    // 超时后记录警告
+    console.warn(`配置注册等待超时 (${maxWaitTime}ms)`)
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
@@ -1439,15 +1603,16 @@ export class SettingsWebviewProvider {
             </div>
 
             <div class="form-group">
-                <label for="localPath">本地仓库路径 (可选)</label>
-                <input type="text" id="localPath" placeholder="留空使用默认路径">
-                <div class="help-text" id="localPathHelp">
-                    <div>如果留空，将使用系统默认路径</div>
-                    <div id="defaultPathInfo" class="default-path-info"></div>
+                <label>本地仓库路径</label>
+                <div class="platform-info">
+                    <span id="currentRepoPath">自动管理</span>
                 </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="useDefaultPath">
-                    <label for="useDefaultPath">使用默认路径</label>
+                <div class="help-text" id="localPathHelp">
+                    <div>🔄 编辑器特定路径：</div>
+                    <div>• 系统自动为不同编辑器（VSCode/Cursor）创建独立的存储目录</div>
+                    <div>• 确保不同编辑器间的数据完全隔离，避免冲突</div>
+                    <div>• 不同Git平台（GitHub/GitLab/Gitee）使用独立的子目录</div>
+                    <div id="defaultPathInfo" class="default-path-info"></div>
                 </div>
             </div>
 
@@ -1582,9 +1747,8 @@ export class SettingsWebviewProvider {
         // Git配置相关元素
         const providerSelect = document.getElementById('provider');
         const repositoryUrlInput = document.getElementById('repositoryUrl');
-        const localPathInput = document.getElementById('localPath');
+        const currentRepoPath = document.getElementById('currentRepoPath');
         const defaultPathInfo = document.getElementById('defaultPathInfo');
-        const useDefaultPathCheckbox = document.getElementById('useDefaultPath');
         const defaultBranchInput = document.getElementById('defaultBranch');
         const authenticationMethodSelect = document.getElementById('authenticationMethod');
         const tokenInput = document.getElementById('token');
@@ -1617,6 +1781,7 @@ export class SettingsWebviewProvider {
         var defaultLocalPath = '';
         var multiPlatformConfig = null;
         var activePlatformConfig = null;
+        var platformPaths = {}; // 存储后端解析的实际路径
 
         // 转义HTML特殊字符
         function escapeHTML(str) {
@@ -1628,23 +1793,34 @@ export class SettingsWebviewProvider {
                 .replace(/'/g, '&#039;');
         }
 
-        // 初始化默认路径信息
-        function updateDefaultPathInfo(defaultPath, description) {
-            if (defaultPathInfo) {
-                defaultPathInfo.textContent = description || \`默认路径: \${defaultPath}\`;
+        // 更新路径显示信息
+        function updatePathDisplay() {
+            const provider = providerSelect.value;
+            
+            if (currentRepoPath && provider && platformPaths[provider]) {
+                // 显示当前平台的编辑器特定路径
+                currentRepoPath.textContent = platformPaths[provider];
+            } else if (currentRepoPath) {
+                // 显示编辑器信息
+                const editorType = detectEditorType();
+                currentRepoPath.textContent = \`\${editorType} 专用存储（选择平台后显示具体路径）\`;
             }
         }
 
-        // 使用默认路径复选框切换
-        useDefaultPathCheckbox.addEventListener('change', () => {
-            if (useDefaultPathCheckbox.checked) {
-                localPathInput.value = '';
-                localPathInput.placeholder = '将使用默认路径';
-                localPathInput.disabled = true;
+        // 检测编辑器类型
+        function detectEditorType() {
+            // 这是一个简化版本，与后端的检测逻辑保持一致
+            const userAgent = navigator.userAgent.toLowerCase();
+            if (userAgent.includes('cursor')) {
+                return 'Cursor';
             } else {
-                localPathInput.disabled = false;
-                localPathInput.placeholder = '留空使用默认路径';
+                return 'VSCode';
             }
+        }
+
+        // 平台选择变化
+        providerSelect.addEventListener('change', () => {
+            updatePathDisplay();
         });
 
         // 认证方式切换
@@ -1742,13 +1918,10 @@ export class SettingsWebviewProvider {
 
         // 获取表单数据
         function getFormData() {
-            // 如果勾选了使用默认路径，或者路径为空，则不传递localPath
-            const localPathValue = useDefaultPathCheckbox.checked ? '' : localPathInput.value.trim();
-            
             return {
                 provider: providerSelect.value,
                 repositoryUrl: repositoryUrlInput.value.trim(),
-                localPath: localPathValue,
+                localPath: '', // 现在总是使用编辑器特定的默认路径
                 defaultBranch: defaultBranchInput.value.trim() || 'main',
                 authenticationMethod: authenticationMethodSelect.value,
                 token: tokenInput.value.trim(),
@@ -1764,23 +1937,14 @@ export class SettingsWebviewProvider {
             providerSelect.value = config.provider || '';
             repositoryUrlInput.value = config.repositoryUrl || '';
             
-            // 处理本地路径逻辑
-            const isUsingDefault = !config.localPath || config.localPath.trim() === '' || config.isUsingDefaultPath;
-            if (isUsingDefault) {
-                localPathInput.value = '';
-                useDefaultPathCheckbox.checked = true;
-                localPathInput.disabled = true;
-                localPathInput.placeholder = '将使用默认路径';
-            } else {
-                localPathInput.value = config.localPath;
-                useDefaultPathCheckbox.checked = false;
-                localPathInput.disabled = false;
-                localPathInput.placeholder = '留空使用默认路径';
-            }
+            // 更新路径显示（现在总是自动管理）
+            updatePathDisplay();
             
-            // 更新默认路径信息显示
+            // 如果有路径描述信息，显示在帮助文本中
             if (config.defaultPathDescription) {
-                updateDefaultPathInfo(config.effectiveLocalPath, config.defaultPathDescription);
+                if (defaultPathInfo) {
+                    defaultPathInfo.textContent = config.defaultPathDescription;
+                }
             }
             
             defaultBranchInput.value = config.defaultBranch || 'main';
@@ -1802,6 +1966,7 @@ export class SettingsWebviewProvider {
                 if (currentPlatform && ['github', 'gitlab', 'gitee'].includes(currentPlatform)) {
                     const currentFormData = getFormData();
                     currentFormData.provider = currentPlatform;
+                    
                     platformConfigs[currentPlatform] = currentFormData;
                     // console.log('保存前先更新缓存:', getPlatformName(currentPlatform));
                 }
@@ -1917,6 +2082,7 @@ export class SettingsWebviewProvider {
                 const currentFormData = getFormData();
                 // 确保保存的配置包含正确的provider
                 currentFormData.provider = currentPlatform;
+                
                 platformConfigs[currentPlatform] = currentFormData;
                 // console.log('已保存', getPlatformName(currentPlatform), '配置到缓存');
             }
@@ -1966,31 +2132,7 @@ export class SettingsWebviewProvider {
             }
         }
 
-        // 获取平台特定的默认路径
-        function getPlatformDefaultPath(platform) {
-            const isWindows = navigator.platform.indexOf('Win') > -1;
-            const isMac = navigator.platform.indexOf('Mac') > -1;
-            
-            const platformName = getPlatformName(platform);
-            
-            if (isWindows) {
-                return \`%USERPROFILE%\\Documents\\StarCode-Snippets\\\${platformName}\`;
-            } else if (isMac) {
-                return \`~/Documents/StarCode-Snippets/\${platformName}\`;
-            } else {
-                // Linux
-                return \`~/.local/share/starcode-snippets/\${platform.toLowerCase()}\`;
-            }
-        }
 
-        // 更新平台特定的默认路径显示
-        function updatePlatformDefaultPathInfo(platform) {
-            if (defaultPathInfo && platform) {
-                const defaultPath = getPlatformDefaultPath(platform);
-                const platformName = getPlatformName(platform);
-                defaultPathInfo.textContent = \`\${platformName} 默认路径: \${defaultPath}\`;
-            }
-        }
 
         // 显示路径冲突警告
         function updatePathConflictsDisplay(pathConflicts) {
@@ -2059,9 +2201,18 @@ export class SettingsWebviewProvider {
                     // 更新多平台配置数据
                     multiPlatformConfig = message.multiConfig;
                     activePlatformConfig = message.activePlatform;
+                    platformPaths = message.platformPaths || {}; // 保存后端解析的实际路径
                     
                     // 缓存多平台配置
                     if (message.multiConfig && message.multiConfig.platforms) {
+                        // 先清空所有缓存，确保删除的配置不会残留
+                        platformConfigs = {
+                            github: null,
+                            gitlab: null,
+                            gitee: null
+                        };
+                        
+                        // 然后只缓存实际存在的平台配置
                         message.multiConfig.platforms.forEach(platform => {
                             // 合并平台配置和全局自动同步设置
                             const platformWithGlobalSettings = {
@@ -2122,8 +2273,8 @@ export class SettingsWebviewProvider {
                     updateActivePlatformDisplay();
                     renderPlatformList();
                     
-                    // 更新当前平台的默认路径显示
-                    updatePlatformDefaultPathInfo(currentPlatform);
+                    // 更新当前平台的路径显示
+                    updatePathDisplay();
                     
                     // 显示路径冲突警告
                     updatePathConflictsDisplay(message.pathConflicts);
@@ -2201,6 +2352,11 @@ export class SettingsWebviewProvider {
                         // 更新所有平台的缓存
                         if (message.savedCount > 0) {
                             // console.log('批量保存成功，已保存 ' + message.savedCount + ' 个平台配置');
+                            
+                            // 重新请求配置以确保显示正确的状态
+                            setTimeout(() => {
+                                vscode.postMessage({ type: 'loadConfig' });
+                            }, 300);
                         }
                     } else {
                         // 检查是否是权限错误
@@ -2227,6 +2383,14 @@ export class SettingsWebviewProvider {
                     vscode.postMessage({ type: 'loadConfig' });
                     break;
                 case 'platformConfigDeleted':
+                    // 清除缓存中对应的配置
+                    if (message.configId && multiPlatformConfig && multiPlatformConfig.platforms) {
+                        const deletedPlatform = multiPlatformConfig.platforms.find(p => p.id === message.configId);
+                        if (deletedPlatform && deletedPlatform.provider) {
+                            platformConfigs[deletedPlatform.provider] = null;
+                            // console.log('已清除缓存中的', getPlatformName(deletedPlatform.provider), '配置');
+                        }
+                    }
                     showStatus('平台配置已删除', 'success');
                     // 重新加载配置以更新显示
                     vscode.postMessage({ type: 'loadConfig' });

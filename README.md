@@ -1,94 +1,161 @@
 # StarCode Snippets
 
-一个用于保存、组织和重用代码片段的VSCode插件。
+**⚠️ 当前正在进行重构 - 极简文件存储系统**
 
-代码作者：Claude-3.5-sonnet、Claude-3.7-sonnet和Claude-4-sonnet。
+本项目当前正在进行重要的架构重构，将Git存储从复杂的元数据文件系统简化为纯代码文件存储：
 
-## 功能特点
+- **Git仓库**: 只存储纯代码文件，不含任何元数据
+- **VSCode本地存储**: 管理用户友好的信息（名称、分类、标签等）
+- **路径映射**: 通过gitPath字段连接VSCode显示与Git文件路径
 
-- 在编辑器中选择代码后，可以快速保存到代码库中
-- 在侧边栏提供代码库视图，方便管理所有保存的代码片段
-- 支持创建目录来组织代码片段
-- 支持编辑、重命名、移动、搜索、导入、导出和删除代码片段
-- 支持快速粘贴已保存的代码片段
-- 支持通过兼容S3的对象存储服务进行云同步(实验性)
+## 测试命令
 
-## 使用方法
+使用 `starcode-snippets.testRealFileStorage` 命令测试新的极简文件存储系统。
 
-1. 在编辑器中选择代码，右键选择"保存至代码库"
-2. 在侧边栏的代码库中查看和管理已保存的代码片段
-3. 点击代码片段右侧的图标可以：
-   - 粘贴代码片段到当前位置
-   - 编辑代码片段内容
-   - 重命名代码片段
-   - 移动代码片段到其他目录
-   - 删除代码片段
-   - 预览代码片段
-   - 导出代码片段
+---
 
-## 云端同步设置
+A powerful code snippet manager for Visual Studio Code that allows you to save, organize, and reuse code snippets across multiple programming languages with cloud synchronization support.
 
-扩展支持与多个 Git 平台同步：
+## Features
 
-- **GitHub**: 需要个人访问令牌
-- **GitLab**: 支持 gitlab.com 和私有实例，需要项目访问令牌
-- **Gitee**: 中国用户的可选方案
+### Core Features
+- 📝 **Save Code Snippets**: Quickly save selected code with keyboard shortcuts
+- 📁 **Organize with Folders**: Create hierarchical folder structure to organize snippets
+- 🔍 **Smart Search**: Full-text search across all snippets with fuzzy matching
+- 🌍 **Multi-language Support**: Support for 20+ programming languages with syntax highlighting
+- 📋 **Quick Access**: Insert snippets directly into your code with one click
 
-配置步骤：
+### Cloud Synchronization
+- ☁️ **Multi-platform Sync**: Support for GitHub, GitLab, and Gitee repositories
+- 🔐 **Multiple Authentication**: Token-based and SSH key authentication
+- 🔄 **Auto Sync**: Automatic synchronization with configurable intervals
+- 🤝 **Conflict Resolution**: Intelligent merge algorithm with manual conflict resolution
+- 📦 **Backup & Restore**: Automatic backup before sync operations
 
-1. 点击代码片段视图中的"云端同步设置"
-2. 选择您的 Git 平台
-3. 填写仓库信息和访问令牌
-4. 启用自动同步（可选）
+### Import & Export
+- 📥 **Multiple Formats**: Import from VSCode snippets, JSON, and other formats
+- 📤 **Export Options**: Export to various formats for backup or sharing
+- 🔄 **Migration Tools**: Seamless migration between storage versions
 
-## 数据库版本管理
+## Quick Start
 
-扩展支持两种数据存储格式：
+1. **Install the Extension**
+   - Search for "StarCode Snippets" in VS Code extensions
+   - Click Install
 
-- **V1格式**: 基于ID的层级结构（旧版本）
-- **V2格式**: 基于路径的文件系统结构（推荐）
+2. **Save Your First Snippet**
+   - Select code in the editor
+   - Use `Ctrl+Shift+S` (Windows/Linux) or `Cmd+Shift+S` (Mac)
+   - Enter a name and choose a folder
 
-### 数据迁移
+3. **Access Your Snippets**
+   - Open the StarCode Snippets panel in the sidebar
+   - Browse, search, and insert snippets
+   - Use the search bar for quick filtering
 
-扩展会自动检测并迁移V1数据到V2格式。您也可以手动触发迁移：
+## Cloud Synchronization Setup
 
-```
-Ctrl+Shift+P (Cmd+Shift+P on Mac) → "StarCode Snippets: 迁移数据到V2格式"
-```
+### GitHub Setup
+1. Create a new repository on GitHub
+2. Generate a Personal Access Token with `repo` permissions
+3. Open StarCode Snippets Settings
+4. Configure GitHub as your provider with repository URL and token
 
-## 常见问题
+### GitLab Setup
+1. Create a new project on GitLab
+2. Generate a Personal Access Token with `api` scope
+3. Configure GitLab provider in settings
 
-### 同步问题
+### Gitee Setup
+1. Create a new repository on Gitee
+2. Generate a Personal Access Token
+3. Configure Gitee provider in settings
 
-如果遇到同步问题，请检查：
+## Keyboard Shortcuts
 
-1. 网络连接是否正常
-2. 访问令牌是否有效
-3. 仓库权限是否足够
+| Action | Windows/Linux | macOS |
+|--------|---------------|-------|
+| Save Snippet | `Ctrl+Shift+S` | `Cmd+Shift+S` |
+| Open Search | `Ctrl+Shift+F` | `Cmd+Shift+F` |
+| Sync to Cloud | `Ctrl+Shift+U` | `Cmd+Shift+U` |
 
-### 数据丢失
+## Advanced Features
 
-数据查看器可以帮助您：
+### Conflict Resolution
+When synchronizing across multiple devices, conflicts may arise. StarCode Snippets provides:
+- **Automatic Resolution**: Smart merging for non-conflicting changes
+- **Manual Resolution**: Visual diff interface for complex conflicts
+- **Backup Protection**: Automatic backup before any destructive operations
 
-1. 确认数据实际存储位置
-2. 检查是否需要数据迁移
-3. 验证数据完整性
+### Search Capabilities
+- **Full-text Search**: Search within snippet content
+- **Tag-based Filtering**: Filter by programming language or custom tags
+- **Fuzzy Matching**: Find snippets even with partial or misspelled queries
 
-## 开发
+### Organization
+- **Hierarchical Folders**: Unlimited nesting depth
+- **Drag & Drop**: Reorder snippets and folders easily
+- **Bulk Operations**: Move, delete, or export multiple snippets at once
 
-### 构建
+## Configuration
 
-```bash
-npm install
-npm run build
-```
+Access settings through Command Palette (`Ctrl+Shift+P`) → "StarCode Snippets: Open Settings"
 
-### 测试
+### Key Settings
+- **Auto Sync**: Enable automatic synchronization
+- **Sync Interval**: Configure how often to sync (5-60 minutes)
+- **Default Language**: Set default programming language for new snippets
+- **Backup Settings**: Configure automatic backup behavior
 
-```bash
-npm test
-```
+## Troubleshooting
 
-## 许可证
+### Common Issues
 
-MIT License
+**Sync Failures**
+- Check network connectivity
+- Verify token permissions and expiration
+- Ensure repository exists and is accessible
+
+**Performance Issues**
+- Large number of snippets may slow down search
+- Consider organizing snippets into folders
+- Clear cache through settings if needed
+
+**Authentication Errors**
+- Regenerate access tokens
+- Check repository permissions
+- Verify SSH key configuration for SSH authentication
+
+### Support Commands
+- `StarCode Snippets: Diagnose Configuration` - Check setup issues
+- `StarCode Snippets: Clear Cache` - Reset local cache
+- `StarCode Snippets: Export Backup` - Create manual backup
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+1. Clone the repository
+2. Run `npm install`
+3. Open in VS Code
+4. Press F5 to launch extension development host
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+
+## Support
+
+- 🐛 Report bugs on [GitHub Issues](https://github.com/your-repo/starcode-snippets/issues)
+- 💡 Request features through GitHub Issues
+- 📖 Check documentation for detailed usage guides
+- 💬 Join our community discussions
+
+---
+
+**Boost your coding productivity with StarCode Snippets!** 🚀

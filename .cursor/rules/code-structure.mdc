@@ -6,24 +6,28 @@ alwaysApply: true
 # 代码结构
 
 ## 目录结构
-- `src/commands/` - 复杂命令实现
-- `src/editor/` - 编辑器相关功能
-- `src/provider/` - 提供插件的视图与视图数据
-- `src/storage/` - 存储管理相关功能
-- `src/types/` - TypeScript 类型定义
-- `src/utils/` - 工具函数
+- `src/commands/` - 复杂命令实现（诊断、测试、迁移、清理等）
+- `src/editor/` - 编辑器相关功能（代码片段编辑器）
+- `src/provider/` - 视图提供者（树视图、设置页面、数据查看器等）
+- `src/storage/` - 存储管理相关功能（本地存储管理）
+- `src/types/` - TypeScript 类型定义（V1/V2数据结构、配置接口等）
+- `src/utils/` - 工具函数（云同步、搜索、路径处理、导入导出等）
 
 ## 代码组织方式
-1. **命令模块**：复杂的扩展命令在 `src/commands/` 中单独实现
-2. **视图**：在 `src/provider/` 中实现树视图
-3. **存储层**：`src/storage/` 处理本地和云端数据持久化
-4. **模型**：`src/types/` 定义了代码片段和目录的数据结构
+1. **命令模块**：复杂的扩展命令在 `src/commands/` 中单独实现，包括诊断、迁移、冲突解决等功能
+2. **视图层**：在 `src/provider/` 中实现树视图、设置WebView、历史记录等UI组件
+3. **存储层**：`src/storage/` 处理本地数据持久化，`src/utils/` 中的同步管理器处理云端同步
+4. **模型层**：`src/types/` 定义了代码片段和目录的数据结构，支持V1和V2格式
+5. **工具层**：`src/utils/` 包含各种功能模块，如云同步、搜索、路径处理等
 
 ## 主要组件
 - **Snippet Explorer**：代码片段资源管理器，显示在 VSCode 活动栏中
-- **Storage Manager**：管理本地存储和云同步
-- **命令控制器**：处理各种用户操作
-- **编辑器集成**：处理代码片段的编辑和预览
+- **Storage Manager**：管理本地存储
+- **Cloud Sync Manager**：处理多平台云端同步（GitHub、GitLab、Gitee）
+- **Settings Manager**：管理扩展配置和多平台配置
+- **Search Manager**：处理代码片段搜索功能
+- **Editor Integration**：处理代码片段的编辑和预览
+- **Import/Export**：处理数据的导入导出和格式转换
 
 ## 扩展点
 - 活动栏视图容器：`starcode-snippets-container`

@@ -1,0 +1,129 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 开发和调试指南
+
+## 项目架构特点
+- **单文件集中**: 主要逻辑集中在 [extension.ts](mdc:src/extension.ts) 中（1700+ 行），包含大部分命令实现
+- **模块化工具**: 复杂功能通过 `src/utils/` 和 `src/commands/` 中的独立模块实现
+- **WebView 集成**: 设置页面、数据查看器等使用 WebView 技术
+
+## 开发环境设置
+
+### 必需依赖
+- Node.js 20.x
+- TypeScript 5.7+
+- VSCode 1.15.0+
+
+### 开发命令
+```bash
+npm run compile          # 编译 TypeScript
+npm run watch           # 监听模式编译
+npm run package         # 生产环境打包
+npm run build           # 完整构建流程
+npm run lint            # ESLint 检查
+```
+
+## 关键开发模式
+
+### 命令实现模式
+1. **简单命令**: 直接在 [extension.ts](mdc:src/extension.ts) 中实现
+2. **复杂命令**: 在 `src/commands/` 中独立实现，然后在 extension.ts 中注册
+
+### WebView 开发
+- 设置页面: [settingsWebviewProvider.ts](mdc:src/provider/settingsWebviewProvider.ts)
+- 数据查看器: [dataViewerWebviewProvider.ts](mdc:src/provider/dataViewerWebviewProvider.ts)
+- 使用 Monaco Editor 进行代码编辑
+
+### 存储开发
+- 本地存储: [storageManager.ts](mdc:src/storage/storageManager.ts)
+- 版本兼容: 支持 V1 和 V2 数据格式
+- 路径处理: [pathUtils.ts](mdc:src/utils/pathUtils.ts)
+
+## 调试工具和方法
+
+### 内置调试命令
+- `starcode-snippets.testCommand` - 通用测试命令
+- `starcode-snippets.diagnoseConfigPermissionsSimple` - 诊断配置问题
+- `starcode-snippets.debugGiteeAuth` - 调试 Gitee 认证
+- `starcode-snippets.openDataViewer` - 查看数据库状态
+
+### 日志和错误处理
+```typescript
+// 使用 VSCode 输出通道记录日志
+const outputChannel = vscode.window.createOutputChannel('StarCode Snippets')
+outputChannel.appendLine('调试信息')
+
+// 错误处理模式
+try {
+  // 执行操作
+} catch (error) {
+  vscode.window.showErrorMessage(`操作失败: ${error.message}`)
+  outputChannel.appendLine(`错误详情: ${error.stack}`)
+}
+```
+
+### 开发调试技巧
+1. **F5 调试**: 使用 VSCode 的扩展调试功能
+2. **输出面板**: 查看 "StarCode Snippets" 输出通道的日志
+3. **开发者工具**: 对于 WebView，可以使用 "开发者工具" 调试
+4. **断点调试**: 在关键函数设置断点进行调试
+
+## 测试策略
+
+### 单元测试
+- 重点测试 [pathUtils.ts](mdc:src/utils/pathUtils.ts) 中的路径处理逻辑
+- 测试数据格式转换功能
+- 验证配置验证逻辑
+
+### 集成测试
+- 测试完整的同步流程
+- 验证多平台配置切换
+- 测试冲突解决机制
+
+### 手动测试检查表
+- [ ] 创建/删除代码片段和目录
+- [ ] 搜索功能正常工作
+- [ ] 导入/导出功能正确
+- [ ] 云同步配置和执行
+- [ ] 冲突解决流程
+- [ ] 多平台配置切换
+
+## 常见问题排查
+
+### 云同步问题
+1. 检查网络连接
+2. 验证 Token 权限和有效性
+3. 查看 Git 仓库状态
+4. 检查本地路径权限
+
+### 数据迁移问题
+- 使用 [migrateCommand.ts](mdc:src/commands/migrateCommand.ts) 进行数据迁移
+- 检查数据格式版本
+- 验证路径映射正确性
+
+### 性能问题
+- 大量代码片段时的搜索性能
+- 云同步频率优化
+- WebView 渲染性能
+
+## 代码质量检查
+
+### ESLint 配置
+项目使用 [eslint.config.mjs](mdc:eslint.config.mjs) 配置，包含：
+- TypeScript 规则
+- VSCode 扩展开发最佳实践
+- 代码风格统一
+
+### 代码审查要点
+1. **类型安全**: 确保 TypeScript 类型正确
+2. **错误处理**: 所有异步操作都有适当的错误处理
+3. **用户体验**: 长时间操作提供进度反馈
+4. **向后兼容**: 新功能不破坏现有数据
+5. **文档更新**: 新功能需要更新相关文档
+
+### 注意事项
+1. 不允许在未经用户同意的情况下修改 [README.md](mdc:README.md)和 [CHANGELOG.md](mdc:CHANGELOG.md)。这两个文件是发布插件新版本前才能修改的。用户会亲自修改这两个文件。
+2. 只有在用户允许的情况下才能将当前任务的总结写入新的文档中。

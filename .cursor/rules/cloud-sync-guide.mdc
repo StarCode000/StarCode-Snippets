@@ -1,0 +1,97 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 多平台云同步功能指南
+
+## 概述
+StarCode Snippets 支持多平台 Git 仓库云同步，允许用户将代码片段同步到 GitHub、GitLab、Gitee 等平台。
+
+## 核心组件
+
+### 配置管理
+- [settingsManager.ts](mdc:src/utils/settingsManager.ts) - 管理多平台配置的增删改查
+- [settingsWebviewProvider.ts](mdc:src/provider/settingsWebviewProvider.ts) - 设置页面UI，支持多平台配置管理
+
+### 同步引擎
+- [cloudSyncManager.ts](mdc:src/utils/cloudSyncManager.ts) - 云同步核心逻辑，处理 Git 操作
+- [autoSyncManager.ts](mdc:src/utils/autoSyncManager.ts) - 自动同步管理器
+- [syncStatusManager.ts](mdc:src/utils/syncStatusManager.ts) - 同步状态追踪
+
+### 平台支持
+支持的 Git 平台：
+- **GitHub**: 使用 personal access token 或 SSH 密钥
+- **GitLab**: 支持 GitLab.com 和私有部署实例
+- **Gitee**: 中国用户友好的代码托管平台
+
+## 配置结构
+
+### 多平台配置 (GitPlatformConfig)
+```typescript
+interface GitPlatformConfig {
+  id: string                    // 唯一标识符
+  name: string                  // 用户自定义名称
+  provider: 'github' | 'gitlab' | 'gitee'
+  repositoryUrl: string         // 仓库URL
+  token: string                 // 访问令牌
+  localPath: string             // 本地仓库路径
+  defaultBranch: string         // 默认分支
+  authenticationMethod: 'token' | 'ssh'
+  sshKeyPath: string            // SSH密钥路径
+  commitMessageTemplate: string // 提交信息模板
+  isActive: boolean             // 是否为激活配置
+}
+```
+
+## 同步流程
+
+### 手动同步
+1. 检查当前激活配置
+2. 初始化或更新本地 Git 仓库
+3. 拉取远程更改（如果存在）
+4. 处理冲突（如有）
+5. 推送本地更改到远程仓库
+
+### 自动同步
+- 基于用户设置的时间间隔自动执行同步
+- 在数据变更时触发同步
+- 提供同步状态实时反馈
+
+## 冲突处理
+- [conflictMergeCommand.ts](mdc:src/commands/conflictMergeCommand.ts) - 处理同步冲突的命令
+- 支持三路合并算法
+- 提供可视化冲突解决界面
+- 自动备份冲突前的数据状态
+
+## 认证方式
+
+### Token 认证
+- 支持各平台的 Personal Access Token
+- Token 加密存储在 VSCode 设置中
+- 自动处理 Token 过期和权限问题
+
+### SSH 认证
+- 支持 SSH 密钥对认证
+- 用户需配置本地 SSH 密钥路径
+- 自动处理 SSH Agent 和密钥加载
+
+## 数据安全
+- 敏感信息（Token、SSH密钥）加密存储
+- 同步前自动备份本地数据
+- 提供数据回滚机制
+- 支持选择性同步（排除敏感片段）
+
+## 故障排除工具
+- [diagnoseConfigPermissionsSimple.ts](mdc:src/commands/diagnoseConfigPermissionsSimple.ts) - 诊断配置权限
+- [debugGiteeAuth.ts](mdc:src/commands/debugGiteeAuth.ts) - 调试 Gitee 认证问题
+- [clearGitCredentials.ts](mdc:src/commands/clearGitCredentials.ts) - 清理 Git 凭据
+- [cleanupCommand.ts](mdc:src/commands/cleanupCommand.ts) - 清理临时文件和状态
+
+## 使用建议
+1. **首次配置**: 建议使用 Token 认证，更简单易用
+2. **多平台使用**: 可配置多个平台，根据需要切换激活配置
+3. **安全考虑**: 定期更新 Token，避免在公共网络使用
+4. **备份策略**: 启用自动同步前先手动备份重要数据
+5. **冲突预防**: 避免在多设备同时编辑相同代码片段
+

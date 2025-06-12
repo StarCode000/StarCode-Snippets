@@ -7,6 +7,7 @@ export class SettingsManager {
   private static readonly MULTI_PLATFORM_CONFIG_KEY = 'starcode-snippets.multiPlatformCloudSync'
   private static readonly STATUS_KEY = 'starcode-snippets.cloudSyncStatus'
   private static extensionContext: vscode.ExtensionContext | null = null
+  private static notifiedPathAdjustments = new Set<string>() // 记录已通知的路径调整
 
   /**
    * 获取默认的云端同步配置（向后兼容）
@@ -50,7 +51,7 @@ export class SettingsManager {
       provider: provider,
       repositoryUrl: '',
       token: '',
-      localPath: PathUtils.getDefaultLocalRepoPathForPlatform(provider), // 使用平台特定的默认路径
+      localPath: '', // 使用空路径，系统自动管理编辑器特定路径
       defaultBranch: 'main',
       authenticationMethod: 'token',
       sshKeyPath: '',
@@ -105,7 +106,7 @@ export class SettingsManager {
       provider: platformConfig.provider,
       repositoryUrl: platformConfig.repositoryUrl,
       token: platformConfig.token,
-      localPath: platformConfig.localPath || PathUtils.getDefaultLocalRepoPathForPlatform(platformConfig.provider),
+      localPath: platformConfig.localPath || '',
       defaultBranch: platformConfig.defaultBranch,
       authenticationMethod: platformConfig.authenticationMethod,
       sshKeyPath: platformConfig.sshKeyPath,
@@ -139,9 +140,37 @@ export class SettingsManager {
         
         return isValid;
       }).map(platform => {
-        // 规范化有效平台配置的localPath
+        // 检查并处理本地路径的跨平台兼容性
         if (platform.localPath && platform.localPath.trim() !== '') {
-          platform.localPath = PathUtils.normalizePath(platform.localPath);
+          // 如果是默认路径标识符，跳过所有处理，保持原样
+          if (PathUtils.isDefaultPathToken(platform.localPath)) {
+            // 保持默认路径标识符不变
+            return platform;
+          }
+          
+          // 先检查路径兼容性
+          const pathResult = PathUtils.processImportedPath(platform.localPath, platform.provider);
+          
+          if (pathResult.wasModified) {
+            // 路径不兼容，已自动调整为默认路径标识符
+            platform.localPath = pathResult.processedPath;
+            console.log(`配置读取时检测到不兼容路径，已自动调整：${platform.provider} - ${pathResult.reason}`);
+            
+            // 避免重复通知同一平台的路径调整
+            const notificationKey = `${platform.provider}-path-adjusted`;
+            if (!this.notifiedPathAdjustments.has(notificationKey)) {
+              this.notifiedPathAdjustments.add(notificationKey);
+              
+              // 显示通知给用户
+              vscode.window.showWarningMessage(
+                `检测到不兼容的本地路径配置，已自动调整：\n${platform.provider.toUpperCase()} - ${pathResult.reason}`,
+                '我知道了'
+              );
+            }
+          } else {
+            // 路径兼容，进行标准化处理
+            platform.localPath = PathUtils.normalizePath(platform.localPath);
+          }
         }
         return platform;
       });
@@ -233,6 +262,11 @@ export class SettingsManager {
           await new Promise(resolve => setTimeout(resolve, attempt * 500));
         }
         
+        // 在保存前检查配置是否已注册
+        if (attempt === 1) {
+          await this.ensureConfigurationAvailable();
+        }
+        
         await vscode.workspace.getConfiguration().update(
           this.MULTI_PLATFORM_CONFIG_KEY, 
           config, 
@@ -248,8 +282,17 @@ export class SettingsManager {
         lastError = error instanceof Error ? error : new Error(String(error));
         console.warn(`SettingsManager: 保存多平台配置失败 (第 ${attempt} 次尝试):`, lastError.message);
         
+        // 如果是配置未注册错误，等待配置系统初始化
+        if (lastError.message.includes('没有注册配置') || lastError.message.includes('NoPermissions')) {
+          if (attempt < maxRetries) {
+            // console.log(`检测到配置注册问题，等待 ${attempt * 1000}ms 后重试...`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            // 在重试前再次检查配置
+            await this.ensureConfigurationAvailable();
+          }
+        }
         // 如果是权限错误，等待更长时间再重试
-        if (lastError.message.includes('EPERM') || lastError.message.includes('NoPermissions')) {
+        else if (lastError.message.includes('EPERM')) {
           if (attempt < maxRetries) {
             // console.log(`检测到权限错误，等待 ${attempt * 1000}ms 后重试...`);
             await new Promise(resolve => setTimeout(resolve, attempt * 1000));
@@ -578,15 +621,18 @@ export class SettingsManager {
 
     // 本地路径验证 - 如果用户提供了自定义路径，验证其有效性
     if (config.localPath && config.localPath.trim() !== '') {
-      try {
-        const normalizedPath = PathUtils.normalizePath(config.localPath)
-        // 这里可以添加更严格的路径验证逻辑
-        if (!normalizedPath) {
+      // 如果是默认路径标识符，跳过验证（因为它们总是有效的）
+      if (!PathUtils.isDefaultPathToken(config.localPath)) {
+        try {
+          const normalizedPath = PathUtils.normalizePath(config.localPath)
+          // 这里可以添加更严格的路径验证逻辑
+          if (!normalizedPath) {
+            errors.push('本地仓库路径格式无效')
+          }
+        } catch (error) {
           errors.push('本地仓库路径格式无效')
         }
-      } catch (error) {
-        errors.push('本地仓库路径格式无效')
-    }
+      }
     }
     // 注意：不再强制要求用户提供路径，系统会自动使用默认路径
 
@@ -637,13 +683,16 @@ export class SettingsManager {
 
     // 本地路径验证 - 如果用户提供了自定义路径，验证其有效性
     if (config.localPath && config.localPath.trim() !== '') {
-      try {
-        const normalizedPath = PathUtils.normalizePath(config.localPath)
-        if (!normalizedPath) {
+      // 如果是默认路径标识符，跳过验证（因为它们总是有效的）
+      if (!PathUtils.isDefaultPathToken(config.localPath)) {
+        try {
+          const normalizedPath = PathUtils.normalizePath(config.localPath)
+          if (!normalizedPath) {
+            errors.push('本地仓库路径格式无效')
+          }
+        } catch (error) {
           errors.push('本地仓库路径格式无效')
         }
-      } catch (error) {
-        errors.push('本地仓库路径格式无效')
       }
     }
 
@@ -698,40 +747,49 @@ export class SettingsManager {
 
   /**
    * 获取有效的本地仓库路径
-   * 优先使用用户配置的路径，否则使用平台特定的默认路径
+   * 优先使用编辑器特定路径确保数据隔离
+   * 支持默认路径标识符的解析
    */
   static getEffectiveLocalPath(): string {
     // 优先获取激活平台的配置
     const activePlatform = this.getActivePlatformConfig();
     if (activePlatform) {
-      if (activePlatform.localPath && activePlatform.localPath.trim() !== '') {
-        return activePlatform.localPath;
-      }
-      // 使用平台特定的默认路径
-      return PathUtils.getDefaultLocalRepoPathForPlatform(activePlatform.provider);
+      // 解析默认路径标识符或使用实际路径，传入扩展上下文
+      return PathUtils.resolveDefaultPathToken(
+        activePlatform.localPath || '', 
+        activePlatform.provider, 
+        this.extensionContext || undefined
+      );
     }
     
     // 回退到传统配置
     const config = this.getCloudSyncConfig();
-    if (config.localPath && config.localPath.trim() !== '') {
-      return config.localPath;
-    }
+    const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
     
-    // 如果有传统配置的provider，使用平台特定的默认路径
-    if (config.provider && ['github', 'gitlab', 'gitee'].includes(config.provider)) {
-      return PathUtils.getDefaultLocalRepoPathForPlatform(config.provider as 'github' | 'gitlab' | 'gitee');
-    }
-    
-    // 最终回退到通用默认路径
-    return PathUtils.getDefaultLocalRepoPath();
+    // 解析默认路径标识符或使用实际路径，传入扩展上下文
+    return PathUtils.resolveDefaultPathToken(
+      config.localPath || '', 
+      provider, 
+      this.extensionContext || undefined
+    );
   }
 
   /**
    * 获取路径描述信息，用于UI显示
+   * 优先使用编辑器特定的路径描述
    */
   static getLocalPathDescription(): string {
-    const effectivePath = this.getEffectiveLocalPath();
-    return PathUtils.getPathDescription(effectivePath);
+    // 优先获取激活平台的配置
+    const activePlatform = this.getActivePlatformConfig();
+    if (activePlatform) {
+      return PathUtils.getEditorSpecificPathDescription(activePlatform.provider, this.extensionContext || undefined);
+    }
+    
+    // 回退到传统配置
+    const config = this.getCloudSyncConfig();
+    const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
+    
+    return PathUtils.getEditorSpecificPathDescription(provider, this.extensionContext || undefined);
   }
 
   /**
@@ -741,18 +799,41 @@ export class SettingsManager {
     // 优先检查激活平台的配置
     const activePlatform = this.getActivePlatformConfig();
     if (activePlatform) {
-      return !activePlatform.localPath || activePlatform.localPath.trim() === '' || 
-             PathUtils.isDefaultPathForPlatform(activePlatform.localPath, activePlatform.provider);
+      return PathUtils.isUsingDefaultPath(activePlatform.localPath || '', activePlatform.provider);
     }
     
     // 回退到传统配置
     const config = this.getCloudSyncConfig();
-    if (config.provider && ['github', 'gitlab', 'gitee'].includes(config.provider)) {
-      return !config.localPath || config.localPath.trim() === '' || 
-             PathUtils.isDefaultPathForPlatform(config.localPath, config.provider as 'github' | 'gitlab' | 'gitee');
+    const provider = config.provider as 'github' | 'gitlab' | 'gitee' | undefined;
+    
+    return PathUtils.isUsingDefaultPath(config.localPath || '', provider);
+  }
+
+  /**
+   * 确保配置在VSCode中可用，处理插件更新后的配置注册延迟问题
+   */
+  private static async ensureConfigurationAvailable(): Promise<void> {
+    const maxWaitTime = 2000; // 最大等待2秒
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const config = vscode.workspace.getConfiguration();
+        const configSchema = config.inspect(this.MULTI_PLATFORM_CONFIG_KEY);
+        
+        if (configSchema && configSchema.defaultValue !== undefined) {
+          // 配置已可用
+          return;
+        }
+        
+        // 等待50ms后重试
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (error) {
+        // 忽略检查错误，继续等待
+      }
     }
     
-    // 通用默认路径检查
-    return !config.localPath || config.localPath.trim() === '' || PathUtils.isDefaultPath(config.localPath);
+    // 超时后记录警告但继续执行
+    console.warn(`配置 ${this.MULTI_PLATFORM_CONFIG_KEY} 等待超时，可能存在注册延迟`);
   }
 }

@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/StarCode000/StarCode-Snippets"
   },
-  "version": "0.4.0",
+  "version": "0.4.2",
   "engines": {
     "vscode": "^1.15.0"
   },
@@ -95,8 +95,14 @@
         "icon": "$(move)"
       },
       {
-        "command": "starcode-snippets.createSnippetInDirectory",
+        "command": "starcode-snippets.createSnippet",
         "title": "新建代码片段",
+        "category": "StarCode Snippets",
+        "icon": "$(add)"
+      },
+      {
+        "command": "starcode-snippets.createSnippetInDirectory",
+        "title": "在目录中新建代码片段",
         "category": "StarCode Snippets",
         "icon": "$(add)"
       },
@@ -213,6 +219,37 @@
         "title": "重新初始化Git仓库",
         "category": "StarCode Snippets",
         "icon": "$(repo-forked)"
+      },
+      {
+        "command": "starcode-snippets.pullFromCloud",
+        "title": "从云端拉取数据",
+        "category": "StarCode Snippets",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "starcode-snippets.forcePushToCloud",
+        "title": "强制推送到云端",
+        "category": "StarCode Snippets",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "starcode-snippets.forceImportFromGitRepo",
+        "title": "从Git仓库强制导入",
+        "category": "StarCode Snippets",
+        "icon": "$(repo-sync)"
+      },
+      {
+        "command": "starcode-snippets.applyResolvedConflicts",
+        "title": "应用已解决的冲突",
+        "category": "StarCode Snippets",
+        "icon": "$(check-all)"
+      },
+
+      {
+        "command": "starcode-snippets.clearUnfinishedMerge",
+        "title": "清理未完成的合并状态",
+        "category": "StarCode Snippets",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -247,22 +284,22 @@
           "group": "navigation@3"
         },
         {
-          "command": "starcode-snippets.createDirectory",
+          "command": "starcode-snippets.createSnippet",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@4"
         },
         {
-          "command": "starcode-snippets.importSnippets",
+          "command": "starcode-snippets.createDirectory",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@5"
         },
         {
-          "command": "starcode-snippets.exportAll",
+          "command": "starcode-snippets.importSnippets",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@6"
         },
         {
-          "command": "starcode-snippets.openDataViewer",
+          "command": "starcode-snippets.exportAll",
           "when": "view == starCodeSnippetsExplorer",
           "group": "navigation@7"
         }
@@ -287,6 +324,16 @@
           "command": "starcode-snippets.createSnippetInDirectory",
           "when": "view == starCodeSnippetsExplorer && viewItem == directory",
           "group": "1_creation@1"
+        },
+        {
+          "command": "starcode-snippets.rename",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
+          "group": "2_modify@1"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == starCodeSnippetsExplorer && viewItem == directory",
+          "group": "2_modify@2"
         },
         {
           "command": "starcode-snippets.previewSnippet",
@@ -349,6 +396,16 @@
           "group": "5_export@1"
         },
         {
+          "command": "starcode-snippets.rename",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
+          "group": "6_modify@1"
+        },
+        {
+          "command": "starcode-snippets.delete",
+          "when": "view == starCodeSnippetsExplorer && viewItem == snippet",
+          "group": "6_modify@2"
+        },
+        {
           "command": "starcode-snippets.manualSync",
           "when": "view == starCodeSnippetsExplorer && viewItem == syncStatus",
           "group": "inline@1"
@@ -375,7 +432,6 @@
     "configuration": {
       "title": "StarCode Snippets",
       "properties": {
-
         "starcode-snippets.cloudSyncStatus": {
           "type": "object",
           "default": {
@@ -436,7 +492,11 @@
                   },
                   "provider": {
                     "type": "string",
-                    "enum": ["github", "gitlab", "gitee"],
+                    "enum": [
+                      "github",
+                      "gitlab",
+                      "gitee"
+                    ],
                     "description": "Git 平台提供商"
                   },
                   "repositoryUrl": {
@@ -483,7 +543,10 @@
               "description": "自动同步间隔（分钟）"
             },
             "activeConfigId": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "description": "当前激活的配置ID"
             }
           }
@@ -501,17 +564,24 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "npm run build",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool source-map",
-    "build": "node build-extension.js",
-    "build:quick": "npm run package && vsce package",
+    "build": "node scripts/build-extension.js",
+    "build:full": "node scripts/build-and-package.js",
+    "build:quick": "npm run package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --fix",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "download-monaco": "node scripts/download-monaco.js",
+    "setup": "npm run download-monaco",
+    "pre-publish": "node scripts/pre-publish.js",
+    "publish": "npm run pre-publish && vsce publish",
+    "package-ext": "npm run pre-publish && vsce package",
+    "check-monaco": "node scripts/check-monaco.js"
   },
   "devDependencies": {
     "@types/diff": "^5.2.3",
@@ -522,11 +592,7 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
-    "copy-webpack-plugin": "^12.0.2",
-    "css-loader": "^7.1.2",
-    "eslint": "^9.19.0",
-    "monaco-editor-webpack-plugin": "^7.1.0",
-    "style-loader": "^4.0.0",
+    "eslint": "^9.28.0",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
@@ -535,7 +601,6 @@
   },
   "dependencies": {
     "diff": "^5.1.0",
-    "monaco-editor": "^0.52.2",
     "node-diff3": "^3.1.2",
     "simple-git": "^3.27.0",
     "uuid": "^11.1.0"

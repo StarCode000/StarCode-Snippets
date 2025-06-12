@@ -176,18 +176,46 @@ export class SearchManager {
     }
 
     const relevantDirectoryIds = new Set<string>()
+    const relevantDirectoryPaths = new Set<string>()
 
-    // 收集所有相关的目录ID
+    // 收集所有相关的目录ID和路径
     for (const snippet of filteredSnippets) {
-      let parentId = snippet.parentId
-      while (parentId) {
-        relevantDirectoryIds.add(parentId)
-        const parentDir = directories.find((d) => d.id === parentId)
-        parentId = parentDir?.parentId || null
+      // 处理V1格式的代码片段
+      if ('parentId' in snippet && (snippet as any).parentId) {
+        let parentId: string | null = (snippet as any).parentId
+        while (parentId) {
+          relevantDirectoryIds.add(parentId)
+          const parentDir = directories.find((d) => 'id' in d && (d as any).id === parentId) as any
+          parentId = parentDir?.parentId || null
+        }
+      }
+      
+      // 处理V2格式的代码片段
+      if ('fullPath' in snippet) {
+        // 从完整路径中提取所有父级路径
+        const pathParts = snippet.fullPath.split('/').filter((part: string) => part.length > 0)
+        let currentPath = '/'
+        
+        for (let i = 0; i < pathParts.length - 1; i++) { // 排除文件名
+          currentPath += pathParts[i] + '/'
+          relevantDirectoryPaths.add(currentPath)
+        }
       }
     }
 
-    return directories.filter((dir) => relevantDirectoryIds.has(dir.id))
+    return directories.filter((dir) => {
+      // 检查V1格式的目录
+      if ('id' in dir) {
+        return relevantDirectoryIds.has((dir as any).id)
+      }
+      
+      // 检查V2格式的目录
+      if ('fullPath' in dir) {
+        return relevantDirectoryPaths.has(dir.fullPath)
+      }
+      
+      return false
+    })
   }
 
   /**

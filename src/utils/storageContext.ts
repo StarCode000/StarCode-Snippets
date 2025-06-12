@@ -319,15 +319,24 @@ export class StorageContext {
           await context.globalState.update('snippets', undefined)
           await context.globalState.update('directories', undefined)
           
-          // 删除StorageManager使用的文件数据
+          // 删除StorageManager使用的文件数据（兼容旧格式）
           try {
             const storagePath = context.globalStorageUri
+            
+            // 检查并清理旧的JSON文件（如果存在）
+            try {
             const snippetsFile = vscode.Uri.joinPath(storagePath, 'snippets.json')
             const directoriesFile = vscode.Uri.joinPath(storagePath, 'directories.json')
             
             // 清空文件内容而不是删除文件（避免文件系统错误）
             await vscode.workspace.fs.writeFile(snippetsFile, Buffer.from(JSON.stringify([], null, 2)))
             await vscode.workspace.fs.writeFile(directoriesFile, Buffer.from(JSON.stringify([], null, 2)))
+              
+              console.log('已清理旧的JSON存储文件')
+            } catch (jsonFileError) {
+              // 旧文件可能不存在，不影响转换
+              console.log('未发现旧的JSON存储文件，跳过清理')
+            }
             
             // console.log('StorageManager文件数据已清空')
           } catch (fileError) {

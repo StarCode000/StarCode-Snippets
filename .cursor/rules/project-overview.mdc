@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # StarCode Snippets 项目概述
 
@@ -12,22 +12,37 @@ StarCode Snippets 是一个用于保存、组织和重用代码片段的 VSCode 
 - 分类和组织代码片段
 - 预览和编辑已保存的代码片段
 - 导入和导出代码片段
-- 云端同步功能
+- 多平台云端同步功能（支持 GitHub、GitLab、Gitee）
+- 自动同步和手动同步
+- 代码片段搜索功能
+- 冲突解决和数据迁移
 
 ## 核心文件
-- [extension.ts](mdc:src/extension.ts) - 扩展入口点
+- [extension.ts](mdc:src/extension.ts) - 扩展入口点（主要逻辑集中在此文件）
 - [package.json](mdc:package.json) - 扩展配置和命令定义
-- [treeProvider.ts](mdc:src/provider/treeProvider.ts) - 代码片段资源管理器
-- [storageManager.ts](mdc:src/storage/storageManager.ts) - 存储管理
+- [treeProvider.ts](mdc:src/provider/treeProvider.ts) - 代码片段资源管理器视图
+- [storageManager.ts](mdc:src/storage/storageManager.ts) - 本地存储管理
+- [types.ts](mdc:src/types/types.ts) - 类型定义文件
+
+## 关键工具模块
+- [cloudSyncManager.ts](mdc:src/utils/cloudSyncManager.ts) - 云端同步核心逻辑
+- [settingsManager.ts](mdc:src/utils/settingsManager.ts) - 配置管理
+- [importExport.ts](mdc:src/utils/importExport.ts) - 导入导出功能
+- [pathUtils.ts](mdc:src/utils/pathUtils.ts) - 路径处理工具
+- [searchManager.ts](mdc:src/utils/searchManager.ts) - 搜索功能管理
 
 ## 存储版本
 项目支持两种存储格式版本：
-- v1: 基于ID和parentID的树状结构
-- v2: 基于路径的扁平结构
-优先使用v2版本的存储格式，但是在导入、导出数据时也要确保v1版本的存储数据能转化成v2版本
+- v1: 基于ID和parentID的树状结构（向后兼容）
+- v2: 基于路径的扁平结构（当前推荐）
+优先使用v2版本的存储格式，但在导入、导出数据时也要确保v1版本的存储数据能转化成v2版本
 
 ## 云同步功能
-扩展支持与S3兼容的存储服务进行同步，包括手动同步和自动同步选项。
+扩展支持多平台 Git 仓库同步，包括：
+- 支持的平台：GitHub、GitLab、Gitee
+- 认证方式：Token 认证、SSH 密钥认证
+- 同步模式：手动同步、自动同步
+- 多配置管理：支持同时配置多个平台，可切换激活配置
 
 
 

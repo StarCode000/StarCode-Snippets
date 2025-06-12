@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { StorageManager } from '../storage/storageManager'
 import { StorageStrategyFactory, V1StorageStrategy, V2StorageStrategy } from '../utils/storageStrategy'
 import { StorageContext } from '../utils/storageContext'
-import { CodeSnippet, Directory, CodeSnippetV2, DirectoryV2 } from '../types/types'
+import { CodeSnippet, Directory } from '../types/types'
 
 export class DataViewerWebviewProvider {
   public static readonly viewType = 'starcode-data-viewer'
@@ -96,7 +96,7 @@ export class DataViewerWebviewProvider {
     }
   }
 
-  private async _loadV1Data(): Promise<{ snippets: CodeSnippet[], directories: Directory[] }> {
+  private async _loadV1Data(): Promise<{ snippets: any[], directories: any[] }> {
     try {
       // 使用V1存储策略直接获取数据
       const v1Strategy = new V1StorageStrategy(this._context)
@@ -115,7 +115,7 @@ export class DataViewerWebviewProvider {
     }
   }
 
-  private async _loadV2Data(): Promise<{ snippets: CodeSnippetV2[], directories: DirectoryV2[] }> {
+  private async _loadV2Data(): Promise<{ snippets: any[], directories: any[] }> {
     try {
       // 使用V2存储策略直接获取数据
       const v2Strategy = new V2StorageStrategy(this._context)

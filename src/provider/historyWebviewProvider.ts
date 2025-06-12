@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import { SettingsManager } from '../utils/settingsManager'
+import { PathUtils } from '../utils/pathUtils'
 
 export class HistoryWebviewProvider {
   public static readonly viewType = 'starcode-snippets.history'
@@ -57,13 +58,16 @@ export class HistoryWebviewProvider {
   private async _openGitLog() {
     try {
       const config = SettingsManager.getCloudSyncConfig()
-      if (!config.localPath) {
+      
+      // 【修复】使用getEffectiveLocalPath()获取实际路径
+      const effectiveLocalPath = SettingsManager.getEffectiveLocalPath()
+      if (!effectiveLocalPath) {
         vscode.window.showWarningMessage('请先配置本地Git仓库路径')
         return
       }
 
       // 打开Git仓库文件夹
-      const folderUri = vscode.Uri.file(config.localPath)
+      const folderUri = vscode.Uri.file(effectiveLocalPath)
       await vscode.commands.executeCommand('vscode.openFolder', folderUri, { forceNewWindow: true })
       
       // 然后用户可以使用VS Code内置的Git功能查看历史

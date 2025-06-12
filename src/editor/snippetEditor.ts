@@ -14,7 +14,7 @@ export class SnippetEditor {
   private extensionContext: vscode.ExtensionContext // Store context
 
   // 跟踪当前正在编辑的Webview面板
-  // Key: snippet.id, Value: { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }
+  // Key: snippet fullPath, Value: { snippet: CodeSnippet, panel: vscode.WebviewPanel, currentCode: string, lastSavedCode: string, isDirtyInWebview: boolean }
   private editingWebviews = new Map<
     string,
     {
@@ -57,10 +57,17 @@ export class SnippetEditor {
     return text
   }
 
+  // 为V2兼容性提供ID获取方法
+  private getSnippetId(snippet: CodeSnippet): string {
+    // V2使用fullPath作为唯一标识
+    return (snippet as any).fullPath || (snippet as any).id || snippet.name
+  }
+
   public async edit(snippet: CodeSnippet): Promise<void> {
     const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined
 
-    const existingSession = this.editingWebviews.get(snippet.id)
+    const snippetId = this.getSnippetId(snippet)
+    const existingSession = this.editingWebviews.get(snippetId)
     if (existingSession) {
       existingSession.panel.reveal(column)
       return
@@ -75,24 +82,8 @@ export class SnippetEditor {
         retainContextWhenHidden: true,
         localResourceRoots: [
           vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist'),
-          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor'),
-          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'dist', 'monaco-editor', 'node_modules'),
-          vscode.Uri.joinPath(
-            this.extensionContext.extensionUri,
-            'dist',
-            'monaco-editor',
-            'node_modules',
-            'monaco-editor'
-          ),
-          vscode.Uri.joinPath(
-            this.extensionContext.extensionUri,
-            'dist',
-            'monaco-editor',
-            'node_modules',
-            'monaco-editor',
-            'min'
-          ),
-          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media'), // 如果有其他media资源
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media'), // 本地monaco编辑器资源
+          vscode.Uri.joinPath(this.extensionContext.extensionUri, 'media', 'monaco-editor'),
         ],
       }
     )
@@ -105,13 +96,13 @@ export class SnippetEditor {
       lastSavedCode: initialCode,
       isDirtyInWebview: false, // Webview会通过消息更新这个状态
     }
-    this.editingWebviews.set(snippet.id, session)
+    this.editingWebviews.set(snippetId, session)
 
     panel.webview.html = this._getWebviewContent(panel.webview, snippet)
 
     panel.onDidDispose(
       () => {
-        const disposedSession = this.editingWebviews.get(snippet.id)
+        const disposedSession = this.editingWebviews.get(snippetId)
         if (disposedSession && disposedSession.isDirtyInWebview) {
           // console.log(`Webview for ${snippet.name} disposed with unsaved changes. Auto-saving.`)
           // 自动保存逻辑
@@ -136,7 +127,7 @@ export class SnippetEditor {
               vscode.window.showErrorMessage(`关闭时自动保存代码片段 "${updatedSnippet.name}" 失败。`)
             })
         }
-        this.editingWebviews.delete(snippet.id)
+        this.editingWebviews.delete(snippetId)
         if (this.editingWebviews.size === 0) {
           ContextManager.setEditingSnippet(false)
         }
@@ -147,11 +138,29 @@ export class SnippetEditor {
 
     panel.webview.onDidReceiveMessage(
       async (message) => {
+        // 【重要修复】检查webview是否已被销毁
+        try {
+          if (panel.webview === undefined) {
+            console.warn('收到消息但webview已被销毁:', message.type)
+            return
+          }
+        } catch (error) {
+          console.warn('Webview已被销毁，忽略消息:', message.type)
+          return
+        }
+
         // console.log('收到WebView消息:', message.type, message.snippetId)
 
-        const currentSession = this.editingWebviews.get(message.snippetId || snippet.id)
+        const messageSnippetId = message.snippetId || snippetId
+        const currentSession = this.editingWebviews.get(messageSnippetId)
         if (!currentSession) {
-          console.warn('Received message for non-existent session:', message.snippetId)
+          console.warn('Received message for non-existent session:', messageSnippetId)
+          return
+        }
+        
+        // 【重要修复】再次检查当前session的panel是否还有效
+        if (currentSession.panel !== panel || currentSession.panel.webview === undefined) {
+          console.warn('Session panel已失效，忽略消息:', message.type)
           return
         }
 
@@ -163,14 +172,19 @@ export class SnippetEditor {
               // console.log('代码片段内容前50个字符:', currentSession.currentCode.substring(0, 50))
             }
 
-            panel.webview.postMessage({
-              type: 'loadSnippet',
-              data: {
-                code: currentSession.currentCode,
-                language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
-                snippetId: currentSession.snippet.id,
-              },
-            })
+            // 【重要修复】发送消息前检查webview是否还有效
+            try {
+              panel.webview.postMessage({
+                type: 'loadSnippet',
+                data: {
+                  code: currentSession.currentCode,
+                  language: this.mapLanguageToVSCode(currentSession.snippet.language || 'plaintext'),
+                  snippetId: this.getSnippetId(currentSession.snippet),
+                },
+              })
+            } catch (error) {
+              console.warn('发送loadSnippet消息失败，webview可能已被销毁:', error)
+            }
             // console.log('已发送loadSnippet消息到WebView')
             break
           case 'saveSnippet': {
@@ -192,11 +206,21 @@ export class SnippetEditor {
               currentSession.isDirtyInWebview = false
               this._onDidSaveSnippet.fire(updatedSnippet)
               vscode.window.showInformationMessage(`代码片段 "${updatedSnippet.name}" 已保存。`)
-              panel.webview.postMessage({ type: 'saveSuccess', snippetId: currentSession.snippet.id })
+              // 【重要修复】发送消息前检查webview是否还有效
+              try {
+                panel.webview.postMessage({ type: 'saveSuccess', snippetId: this.getSnippetId(currentSession.snippet) })
+              } catch (error) {
+                console.warn('发送saveSuccess消息失败，webview可能已被销毁:', error)
+              }
             } catch (error) {
               console.error('保存代码片段失败 (来自webview):', error)
               vscode.window.showErrorMessage(`保存代码片段 "${updatedSnippet.name}" 失败。`)
-              panel.webview.postMessage({ type: 'saveError', snippetId: currentSession.snippet.id })
+              // 【重要修复】发送消息前检查webview是否还有效
+              try {
+                panel.webview.postMessage({ type: 'saveError', snippetId: this.getSnippetId(currentSession.snippet) })
+              } catch (error) {
+                console.warn('发送saveError消息失败，webview可能已被销毁:', error)
+              }
             }
             break
           }
@@ -214,61 +238,62 @@ export class SnippetEditor {
     ContextManager.setEditingSnippet(true)
   }
 
-  /**
-   * 关闭所有编辑会话
-   */
   public closeAllSessions(): void {
-    this.editingWebviews.forEach(session => {
-      session.panel.dispose();
-    });
-    this.editingWebviews.clear();
-    ContextManager.setEditingSnippet(false);
+    for (const [id, session] of this.editingWebviews) {
+      session.panel.dispose()
+    }
+    this.editingWebviews.clear()
+    ContextManager.setEditingSnippet(false)
   }
 
   private mapLanguageToVSCode(language: string): string {
-    switch (language.toLowerCase()) {
-      case 'vue':
-        return 'html'
-      case 'shell':
-        return 'shellscript'
-      case 'c#':
-      case 'csharp':
-        return 'csharp'
-      case 'c++':
-      case 'cpp':
-        return 'cpp'
-      case 'yaml':
-      case 'yml':
-        return 'yaml'
-      default:
-        return language
+    const languageMap: Record<string, string> = {
+      js: 'javascript',
+      ts: 'typescript',
+      py: 'python',
+      cpp: 'cpp',
+      'c++': 'cpp',
+      cs: 'csharp',
+      'c#': 'csharp',
+      rb: 'ruby',
+      go: 'go',
+      rs: 'rust',
+      php: 'php',
+      java: 'java',
+      kt: 'kotlin',
+      swift: 'swift',
+      plaintext: 'plaintext',
     }
+    return languageMap[language?.toLowerCase()] || language?.toLowerCase() || 'plaintext'
   }
 
   private mapVSCodeLanguageIdToOurs(vscodeLangId: string, originalLanguage?: string): string {
-    if (originalLanguage) {
-      const lowerOriginal = originalLanguage.toLowerCase()
-      if (vscodeLangId === 'html' && lowerOriginal === 'vue') return 'vue'
-      if (vscodeLangId === 'shellscript' && lowerOriginal === 'shell') return 'shell'
+    const reverseMap: Record<string, string> = {
+      javascript: 'js',
+      typescript: 'ts',
+      python: 'py',
+      cpp: 'cpp',
+      csharp: 'cs',
+      ruby: 'rb',
+      go: 'go',
+      rust: 'rs',
+      php: 'php',
+      java: 'java',
+      kotlin: 'kt',
+      swift: 'swift',
+      plaintext: 'plaintext',
     }
-    if (vscodeLangId === 'shellscript') return 'shell'
-    return vscodeLangId
+    return reverseMap[vscodeLangId] || originalLanguage || vscodeLangId || 'plaintext'
   }
 
   private _getWebviewContent(webview: vscode.Webview, snippet: CodeSnippet): string {
     const extensionUri = this.extensionContext.extensionUri
 
-    // 修改monaco路径，指向正确的目录结构
-    const monacoBasePath = vscode.Uri.joinPath(
-      extensionUri,
-      'dist',
-      'monaco-editor',
-      'node_modules',
-      'monaco-editor',
-      'min'
-    )
+    // 使用本地下载的Monaco编辑器
+    const monacoBasePath = vscode.Uri.joinPath(extensionUri, 'media', 'monaco-editor', 'min')
     const monacoLoaderUri = webview.asWebviewUri(vscode.Uri.joinPath(monacoBasePath, 'vs', 'loader.js'))
     const monacoBaseWebViewUri = webview.asWebviewUri(monacoBasePath)
+    const monacoMainCss = webview.asWebviewUri(vscode.Uri.joinPath(monacoBasePath, 'vs', 'editor', 'editor.main.css'))
 
     // 日志记录初始代码片段内容是否为空
     // console.log(`初始化WebView，代码片段[${snippet.id}]内容${snippet.code ? '非空' : '为空'}`)
@@ -291,10 +316,20 @@ export class SnippetEditor {
         ">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>编辑代码片段</title>
+        <link rel="stylesheet" href="${monacoMainCss}">
         <style nonce="${nonce}">
           body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; font-family: var(--vscode-font-family); color: var(--vscode-editor-foreground); background-color: var(--vscode-editor-background);}
           #editor-container { flex-grow: 1; }
-          .controls { padding: 8px 12px; background-color: var(--vscode-sideBar-background, #252526); border-bottom: 1px solid var(--vscode-editorWidget-border, #454545); display: flex; align-items: center; }
+          .controls { 
+            padding: 8px 12px; 
+            background-color: var(--vscode-sideBar-background, #252526); 
+            border-bottom: 1px solid var(--vscode-editorWidget-border, #454545); 
+            display: flex; 
+            align-items: center; 
+            min-height: 40px;
+            position: relative;
+            z-index: 1001; /* 确保控制栏在调试面板之上 */
+          }
           #save-button {
             padding: 4px 12px;
             background-color: var(--vscode-button-background);
@@ -319,18 +354,20 @@ export class SnippetEditor {
           }
           #debug-info {
             position: fixed;
-            top: 5px;
+            top: 60px; /* 调整位置，避免遮挡控制栏 */
             right: 5px;
-            background-color: rgba(30, 30, 30, 0.8);
+            background-color: rgba(30, 30, 30, 0.9);
             color: #ffffff;
-            padding: 5px;
-            border-radius: 3px;
+            padding: 8px;
+            border-radius: 4px;
             font-size: 0.8em;
-            max-width: 300px;
-            max-height: 200px;
+            max-width: 350px;
+            max-height: 250px;
             overflow: auto;
-            z-index: 9999;
-            display: block; /* 默认显示调试面板 */
+            z-index: 1000; /* 降低z-index，避免遮挡按钮 */
+            display: none; /* 默认隐藏调试面板 */
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
           }
           .language-selector-container {
             display: flex;
@@ -396,7 +433,7 @@ export class SnippetEditor {
             </select>
           </div>
           <span id="status-message" class="status-message"></span>
-          <button id="debug-toggle">隐藏调试信息</button>
+          <button id="debug-toggle">显示调试信息</button>
         </div>
         <div id="editor-container"></div>
         <div id="debug-info"></div>
@@ -405,55 +442,32 @@ export class SnippetEditor {
         <script nonce="${nonce}">
           const vscode = acquireVsCodeApi();
           let editor;
-          let currentSnippetId = "${snippet.id}"; 
+          let currentSnippetId = "${this.getSnippetId(snippet)}"; 
           let currentLanguage = ""; 
           let internalDirtyFlag = false;
           let saveInProgress = false;
           const statusMessageElement = document.getElementById('status-message');
           const debugInfoElement = document.getElementById('debug-info');
           const languageSelect = document.getElementById('language-select');
-          const debugToggleButton = document.getElementById('debug-toggle');
-          let isDebugVisible = true; // 默认显示调试面板
-          
-          // 添加全局错误处理
-          window.onerror = function(message, source, lineno, colno, error) {
-            debugLog('Error: ' + message + ' at ' + source + ':' + lineno + ':' + colno);
-            if (error && error.stack) {
-              debugLog('Stack: ' + error.stack);
-            }
-            return false;
-          };
-          
-          // 添加资源加载错误处理
-          window.addEventListener('error', function(e) {
-            if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-              debugLog('Resource error: ' + e.target.src || e.target.href);
-            }
-          }, true);
-          
-          // 初始化调试面板切换按钮
-          debugToggleButton.addEventListener('click', () => {
-            isDebugVisible = !isDebugVisible;
-            debugInfoElement.style.display = isDebugVisible ? 'block' : 'none';
-            debugToggleButton.textContent = isDebugVisible ? '隐藏调试信息' : '显示调试信息';
-            
-            // 如果打开调试面板，滚动到最新的日志
-            if (isDebugVisible) {
-              debugInfoElement.scrollTop = debugInfoElement.scrollHeight;
-            }
-          });
+          let isDebugVisible = false; // 默认隐藏调试面板
           
           // 调试日志函数
           function debugLog(message) {
-            // console.log(message);
+            console.log(message);
             if (debugInfoElement) {
               debugInfoElement.innerHTML += message + '<br>';
               debugInfoElement.scrollTop = debugInfoElement.scrollHeight;
             }
           }
 
-          debugLog('WebView 初始化完成');
-          debugLog('Snippet ID: ' + currentSnippetId);
+          // 初始化调试面板状态
+          debugInfoElement.style.display = 'none';
+          
+          // 初始化调试面板切换按钮
+          document.getElementById('debug-toggle').addEventListener('click', () => {
+            isDebugVisible = !isDebugVisible;
+            debugInfoElement.style.display = isDebugVisible ? 'block' : 'none';
+          });
 
           function updateStatus(message, isError = false) {
             if (statusMessageElement) {
@@ -475,7 +489,7 @@ export class SnippetEditor {
             // 更新Monaco编辑器的语言模式
             monaco.editor.setModelLanguage(editor.getModel(), currentLanguage);
             
-            // 标记为已修改，这样关闭时会保存新的语言设置
+            // 标记为已修改
             internalDirtyFlag = true;
             
             // 通知扩展语言已更改
@@ -490,7 +504,9 @@ export class SnippetEditor {
             
             updateStatus('语言已更改为: ' + currentLanguage);
           });
-          
+
+          debugLog('WebView 初始化完成');
+          debugLog('Snippet ID: ' + currentSnippetId);
           debugLog('发送 ready 消息到扩展');
           vscode.postMessage({ type: 'ready', snippetId: currentSnippetId });
 
@@ -522,7 +538,6 @@ export class SnippetEditor {
                     debugLog('语言选择器设置为: ' + languageOption.value);
                   } else {
                     debugLog('警告: 未找到匹配的语言选项: ' + currentLanguage);
-                    // 对于不在列表中的语言，如果有效，添加一个新选项
                     if (currentLanguage && currentLanguage.trim() !== '') {
                       const newOption = document.createElement('option');
                       newOption.value = currentLanguage;
@@ -535,159 +550,103 @@ export class SnippetEditor {
                 }
                 
                 try {
-                  // 获取正确的路径前缀
                   const monacoPath = "${monacoBaseWebViewUri.toString().replace(/\\\\/g, '/')}";
                   debugLog('Monaco 基础路径: ' + monacoPath);
                   
-                  // 准备多个可能的路径
-                  const possiblePaths = [
-                    monacoPath + '/vs',                            // 直接在当前目录
-                    monacoPath.replace('/min', '') + '/vs',        // 不包含min
-                    monacoPath.replace('/min', '/vs'),             // min替换为vs
-                    monacoPath + '/../vs'                          // 上一级目录
-                  ];
-                  
-                  debugLog('尝试以下路径:');
-                  possiblePaths.forEach(p => debugLog(' - ' + p));
-                  
-                  // 添加一个尝试不同路径的加载函数
-                  function tryLoadMonaco(pathIndex) {
-                    if (pathIndex >= possiblePaths.length) {
-                      debugLog('所有路径都尝试失败，无法加载Monaco');
-                      updateStatus('无法加载编辑器，请查看调试信息', true);
-                      isDebugVisible = true;
-                      debugInfoElement.style.display = 'block';
-                      debugToggleButton.textContent = '隐藏调试信息';
-                      return;
-                    }
-                    
-                    const currentPath = possiblePaths[pathIndex];
-                    debugLog('尝试路径 ' + (pathIndex + 1) + '/' + possiblePaths.length + ': ' + currentPath);
-                    
-                    // 确保require函数存在
-                    if (typeof require === 'undefined') {
-                      // 如果require未定义，创建一个全局polyfill
-                      debugLog('require未定义，创建polyfill');
-                      window.require = function(modules, callback) {
-                        if (callback) {
-                          // 直接调用回调，模拟已加载monaco
-                          setTimeout(() => callback(), 0);
-                        }
-                      };
-                      window.require.config = function(options) {
-                        debugLog('Mock require.config调用: ' + JSON.stringify(options));
-                        // 这是一个mock函数，不执行任何操作
-                      };
-                    }
-                    
-                    // 更新配置
-                    require.config({ paths: { 'vs': currentPath } });
+                  // 直接配置Monaco Editor的路径
+                  require.config({ paths: { 'vs': monacoPath + '/vs' } });
                 
-                window.MonacoEnvironment = {
+                  window.MonacoEnvironment = {
                     getWorkerUrl: function (moduleId, label) {
-                        const workerPath = currentPath + '/base/worker/workerMain.js';
-                        debugLog('Worker URL: ' + workerPath);
-                        return workerPath;
+                      const workerPath = monacoPath + '/vs/base/worker/workerMain.js';
+                      debugLog('Worker URL: ' + workerPath);
+                      return workerPath;
                     }
-                };
+                  };
 
-                    // 尝试加载
-                require(['vs/editor/editor.main'], function () {
-                      debugLog('Monaco成功加载，使用路径: ' + currentPath);
-                      // 继续使用现有的编辑器创建逻辑
-                  if (editor) { 
-                    debugLog('销毁现有编辑器');
-                    editor.dispose(); 
-                  }
-                  
-                  try {
-                    debugLog('创建 Monaco 编辑器实例');
-                    const editorContainer = document.getElementById('editor-container');
-                    if (!editorContainer) {
-                      debugLog('错误: 找不到编辑器容器元素!');
-                      return;
+                  // 加载Monaco Editor
+                  require(['vs/editor/editor.main'], function () {
+                    debugLog('Monaco成功加载');
+                    
+                    if (editor) { 
+                      debugLog('销毁现有编辑器');
+                      editor.dispose(); 
                     }
                     
-                    debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
-                    
-                    // 保存初始代码内容以便于记录
-                    const initialCode = message.data.code || '';
-                    debugLog('初始代码内容长度: ' + initialCode.length);
-                    if (initialCode.length > 0) {
-                      debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
-                    } else {
-                      debugLog('警告: 初始代码内容为空!');
-                    }
-                    
-                    editor = monaco.editor.create(editorContainer, {
-                      value: initialCode,
-                      language: currentLanguage,
-                      theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
-                      automaticLayout: true,
-                      wordWrap: 'on',
-                      minimap: { enabled: true },
-                      scrollbar: {
+                    try {
+                      debugLog('创建 Monaco 编辑器实例');
+                      const editorContainer = document.getElementById('editor-container');
+                      if (!editorContainer) {
+                        debugLog('错误: 找不到编辑器容器元素!');
+                        return;
+                      }
+                      
+                      debugLog('编辑器容器尺寸: ' + editorContainer.offsetWidth + 'x' + editorContainer.offsetHeight);
+                      
+                      const initialCode = message.data.code || '';
+                      debugLog('初始代码内容长度: ' + initialCode.length);
+                      if (initialCode.length > 0) {
+                        debugLog('代码内容前50个字符: "' + initialCode.substring(0, 50) + '..."');
+                      }
+                      
+                      editor = monaco.editor.create(editorContainer, {
+                        value: initialCode,
+                        language: currentLanguage,
+                        theme: document.body.classList.contains('vscode-dark') ? 'vs-dark' : 
+                               (document.body.classList.contains('vscode-high-contrast') ? 'hc-black' : 'vs'),
+                        automaticLayout: true,
+                        wordWrap: 'on',
+                        minimap: { enabled: true },
+                        scrollbar: {
                           useShadows: false,
                           verticalScrollbarSize: 10,
                           horizontalScrollbarSize: 10
-                      }
-                    });
-                    
-                    debugLog('Monaco 编辑器实例创建成功');
-                    
-                    // 验证编辑器的值是否正确设置
-                    setTimeout(() => {
-                      const currentValue = editor.getValue();
-                      debugLog('编辑器内容长度(延迟检查): ' + currentValue.length);
-                      if (currentValue.length === 0 && initialCode.length > 0) {
-                        debugLog('警告: 编辑器内容为空，但初始代码不为空!');
-                      }
-                    }, 500);
-                  } catch (error) {
-                    debugLog('创建编辑器实例出错: ' + error.toString());
-                    console.error('创建编辑器错误:', error);
-                  }
-
-                  try {
-                    debugLog('设置编辑器事件监听器');
-                    editor.onDidChangeModelContent(() => {
-                      internalDirtyFlag = true;
-                      vscode.postMessage({ 
+                        }
+                      });
+                      
+                      debugLog('Monaco 编辑器实例创建成功');
+                      
+                      // 设置编辑器事件监听器
+                      editor.onDidChangeModelContent(() => {
+                        internalDirtyFlag = true;
+                        vscode.postMessage({ 
                           type: 'contentChanged', 
                           snippetId: currentSnippetId, 
                           data: { 
                             code: editor.getValue(),
                             language: currentLanguage
                           } 
+                        });
+                        updateStatus('未保存的更改');
+                        debugLog('内容已更改，已发送 contentChanged 消息');
                       });
-                      updateStatus('未保存的更改');
-                      debugLog('内容已更改，已发送 contentChanged 消息');
-                    });
 
-                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
-                      debugLog('检测到 Ctrl+S 快捷键');
-                      if (!saveInProgress) saveContent();
-                    });
-                    debugLog('编辑器事件监听器设置完成');
-                  } catch (error) {
-                    debugLog('设置事件监听器出错: ' + error.toString());
-                  }
-                }, function(error) {
-                      debugLog('路径 ' + currentPath + ' 加载失败: ' + JSON.stringify(error));
-                      // 尝试下一个路径
-                      setTimeout(() => tryLoadMonaco(pathIndex + 1), 100);
-                });
-                  }
+                      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
+                        debugLog('检测到 Ctrl+S 快捷键');
+                        if (!saveInProgress) saveContent();
+                      });
+                      
+                      debugLog('编辑器事件监听器设置完成');
+                      updateStatus('编辑器已准备就绪');
+                      
+                    } catch (error) {
+                      debugLog('创建编辑器实例出错: ' + error.toString());
+                      updateStatus('创建编辑器失败', true);
+                    }
+                  }, function(error) {
+                    debugLog('Monaco加载失败: ' + JSON.stringify(error));
+                    updateStatus('Monaco编辑器加载失败', true);
+                    // 错误时自动显示调试面板
+                    isDebugVisible = true;
+                    debugInfoElement.style.display = 'block';
+                  });
                   
-                  // 开始尝试加载
-                  tryLoadMonaco(0);
                 } catch (error) {
                   debugLog('Monaco配置错误: ' + (error.message || error));
                   updateStatus('Monaco配置错误，请查看调试信息', true);
-                  // 显示调试面板
+                  // 错误时自动显示调试面板
                   isDebugVisible = true;
                   debugInfoElement.style.display = 'block';
-                  debugToggleButton.textContent = '隐藏调试信息';
                 }
                 break;
               case 'saveSuccess':
@@ -724,6 +683,7 @@ export class SnippetEditor {
                debugLog('内容未更改，不需要保存');
             }
           }
+          
           document.getElementById('save-button').addEventListener('click', () => {
              debugLog('点击保存按钮');
              if (!saveInProgress) saveContent();
