@@ -1,6 +1,7 @@
 import * as os from 'os'
 import * as path from 'path'
 import * as vscode from 'vscode'
+import * as fs from 'fs'
 
 /**
  * 跨平台路径工具类
@@ -559,6 +560,309 @@ export class PathUtils {
       return path.resolve(configuredPath) === path.resolve(actualDefaultPath)
     } catch (error) {
       return false
+    }
+  }
+
+  // ====================== SSH密钥管理 ======================
+
+  /**
+   * 获取SSH密钥存储的基础目录
+   * 使用VSCode全局存储，与Git仓库目录平级
+   */
+  static getSshKeysBaseDir(context?: vscode.ExtensionContext): string {
+    // 优先使用传入的context，否则尝试从SettingsManager获取
+    let extensionContext = context
+    if (!extensionContext) {
+      try {
+        const { SettingsManager } = require('./settingsManager')
+        extensionContext = SettingsManager.getExtensionContext()
+      } catch (error) {
+        console.warn('无法获取扩展上下文，使用备用SSH密钥路径')
+      }
+    }
+
+    if (extensionContext) {
+      // 使用VSCode的globalStorageUri确保编辑器隔离
+      const baseStoragePath = extensionContext.globalStorageUri.fsPath
+      return path.join(baseStoragePath, 'ssh-keys')
+    }
+
+    // 备用方案：使用传统路径
+    console.warn('无法获取VSCode存储路径，使用备用SSH密钥路径')
+    return path.join(this.getDefaultLocalRepoPath(), '..', 'ssh-keys')
+  }
+
+  /**
+   * 获取特定Git平台的SSH密钥目录
+   */
+  static getSshKeyDirForPlatform(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): string {
+    const baseDir = this.getSshKeysBaseDir(context)
+    return path.join(baseDir, gitPlatform)
+  }
+
+  /**
+   * 获取特定Git平台的SSH私钥文件路径
+   * 所有平台统一使用privkey.pem作为文件名
+   */
+  static getSshPrivateKeyPath(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): string {
+    const platformDir = this.getSshKeyDirForPlatform(gitPlatform, context)
+    return path.join(platformDir, 'privkey.pem')
+  }
+
+  /**
+   * 检查SSH私钥文件是否存在
+   */
+  static async checkSshKeyExists(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): Promise<boolean> {
+    try {
+      const keyPath = this.getSshPrivateKeyPath(gitPlatform, context)
+      await fs.promises.access(keyPath, fs.constants.F_OK)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 获取SSH私钥文件信息
+   */
+  static async getSshKeyInfo(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): Promise<{
+    exists: boolean
+    path: string
+    size?: number
+    modified?: Date
+  }> {
+    const keyPath = this.getSshPrivateKeyPath(gitPlatform, context)
+    
+    try {
+      const stats = await fs.promises.stat(keyPath)
+      return {
+        exists: true,
+        path: keyPath,
+        size: stats.size,
+        modified: stats.mtime
+      }
+    } catch {
+      return {
+        exists: false,
+        path: keyPath
+      }
+    }
+  }
+
+  /**
+   * 复制用户选择的SSH私钥文件到管理目录
+   */
+  static async copySshKey(
+    sourceKeyPath: string, 
+    gitPlatform: 'github' | 'gitlab' | 'gitee', 
+    context?: vscode.ExtensionContext
+  ): Promise<{ success: boolean; message: string; keyPath?: string }> {
+    try {
+      // 验证源文件存在
+      try {
+        await fs.promises.access(sourceKeyPath, fs.constants.F_OK)
+      } catch {
+        return {
+          success: false,
+          message: '源SSH密钥文件不存在或无法访问'
+        }
+      }
+
+      // 获取目标目录和文件路径
+      const targetDir = this.getSshKeyDirForPlatform(gitPlatform, context)
+      const targetPath = this.getSshPrivateKeyPath(gitPlatform, context)
+
+      // 确保目标目录存在
+      await fs.promises.mkdir(targetDir, { recursive: true })
+
+      // 读取源文件内容
+      const keyContent = await fs.promises.readFile(sourceKeyPath)
+
+      // 验证是否为有效的SSH私钥
+      const keyText = keyContent.toString()
+      if (!keyText.includes('BEGIN') || !keyText.includes('PRIVATE KEY')) {
+        return {
+          success: false,
+          message: '选择的文件不是有效的SSH私钥文件'
+        }
+      }
+
+      // 复制到目标位置并重命名为privkey.pem
+      await fs.promises.writeFile(targetPath, keyContent, { mode: 0o600 }) // 设置为只有所有者可读写
+
+      return {
+        success: true,
+        message: `SSH私钥已成功复制到管理目录`,
+        keyPath: targetPath
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      return {
+        success: false,
+        message: `复制SSH密钥失败: ${errorMessage}`
+      }
+    }
+  }
+
+  /**
+   * 删除指定Git平台的SSH私钥
+   */
+  static async deleteSshKey(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): Promise<{
+    success: boolean
+    message: string
+  }> {
+    try {
+      const keyPath = this.getSshPrivateKeyPath(gitPlatform, context)
+      
+      // 检查文件是否存在
+      try {
+        await fs.promises.access(keyPath, fs.constants.F_OK)
+      } catch {
+        return {
+          success: true,
+          message: 'SSH私钥文件不存在，无需删除'
+        }
+      }
+
+      // 删除私钥文件
+      await fs.promises.unlink(keyPath)
+
+      // 尝试删除空的平台目录（如果为空）
+      try {
+        const platformDir = this.getSshKeyDirForPlatform(gitPlatform, context)
+        const files = await fs.promises.readdir(platformDir)
+        if (files.length === 0) {
+          await fs.promises.rmdir(platformDir)
+        }
+      } catch {
+        // 忽略删除目录的错误
+      }
+
+      return {
+        success: true,
+        message: 'SSH私钥已成功删除'
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      return {
+        success: false,
+        message: `删除SSH私钥失败: ${errorMessage}`
+      }
+    }
+  }
+
+  /**
+   * 验证SSH私钥文件的有效性
+   */
+  static async validateSshKey(gitPlatform: 'github' | 'gitlab' | 'gitee', context?: vscode.ExtensionContext): Promise<{
+    isValid: boolean
+    message: string
+    keyPath?: string
+  }> {
+    try {
+      const keyPath = this.getSshPrivateKeyPath(gitPlatform, context)
+      
+      // 检查文件是否存在
+      try {
+        await fs.promises.access(keyPath, fs.constants.F_OK)
+      } catch {
+        return {
+          isValid: false,
+          message: 'SSH私钥文件不存在',
+          keyPath: keyPath
+        }
+      }
+
+      // 读取文件内容进行基本验证
+      const keyContent = await fs.promises.readFile(keyPath, 'utf8')
+      
+      // 检查是否包含私钥的基本标识
+      if (!keyContent.includes('BEGIN') || !keyContent.includes('PRIVATE KEY')) {
+        return {
+          isValid: false,
+          message: 'SSH密钥文件格式无效',
+          keyPath: keyPath
+        }
+      }
+
+      // 检查文件权限（建议为600）
+      const stats = await fs.promises.stat(keyPath)
+      const mode = stats.mode & parseInt('777', 8)
+      if (mode !== parseInt('600', 8) && process.platform !== 'win32') {
+        console.warn(`SSH密钥文件权限建议设为600，当前为${mode.toString(8)}`)
+      }
+
+      return {
+        isValid: true,
+        message: 'SSH私钥文件有效',
+        keyPath: keyPath
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      return {
+        isValid: false,
+        message: `验证SSH私钥失败: ${errorMessage}`
+      }
+    }
+  }
+
+  /**
+   * 列出所有已配置的SSH密钥
+   */
+  static async listAllSshKeys(context?: vscode.ExtensionContext): Promise<{
+    github: { exists: boolean; path: string; size?: number; modified?: Date }
+    gitlab: { exists: boolean; path: string; size?: number; modified?: Date }
+    gitee: { exists: boolean; path: string; size?: number; modified?: Date }
+  }> {
+    const platforms: Array<'github' | 'gitlab' | 'gitee'> = ['github', 'gitlab', 'gitee']
+    const result = {} as any
+
+    for (const platform of platforms) {
+      result[platform] = await this.getSshKeyInfo(platform, context)
+    }
+
+    return result
+  }
+
+  /**
+   * 清理所有SSH密钥（慎用）
+   */
+  static async cleanupAllSshKeys(context?: vscode.ExtensionContext): Promise<{
+    success: boolean
+    message: string
+    details: Array<{ platform: string; success: boolean; message: string }>
+  }> {
+    const platforms: Array<'github' | 'gitlab' | 'gitee'> = ['github', 'gitlab', 'gitee']
+    const details: Array<{ platform: string; success: boolean; message: string }> = []
+    let overallSuccess = true
+
+    for (const platform of platforms) {
+      const result = await this.deleteSshKey(platform, context)
+      details.push({
+        platform: platform,
+        success: result.success,
+        message: result.message
+      })
+      if (!result.success) {
+        overallSuccess = false
+      }
+    }
+
+    // 尝试删除整个ssh-keys目录（如果为空）
+    try {
+      const baseDir = this.getSshKeysBaseDir(context)
+      const files = await fs.promises.readdir(baseDir)
+      if (files.length === 0) {
+        await fs.promises.rmdir(baseDir)
+      }
+    } catch {
+      // 忽略删除基础目录的错误
+    }
+
+    return {
+      success: overallSuccess,
+      message: overallSuccess ? '所有SSH密钥已清理完成' : '部分SSH密钥清理失败',
+      details: details
     }
   }
 } 

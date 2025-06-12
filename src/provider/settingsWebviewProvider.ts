@@ -104,6 +104,15 @@ export class SettingsWebviewProvider {
         case 'loadConfig':
           await this._sendConfigToWebview(panel)
           break
+        case 'uploadSshKey':
+          await this._uploadSshKey(message.provider, panel)
+          break
+        case 'deleteSshKey':
+          await this._deleteSshKey(message.provider, panel)
+          break
+        case 'checkSshKeyStatus':
+          await this._checkSshKeyStatus(message.provider, panel)
+          break
       }
       }
     )
@@ -279,7 +288,11 @@ export class SettingsWebviewProvider {
         message: '正在测试连接...',
       })
 
-      // 转换为CloudSyncConfig格式
+      // 转换为CloudSyncConfig格式，确保SSH密钥路径正确
+      const sshKeyPath = config.authenticationMethod === 'ssh' ? 
+        PathUtils.getSshPrivateKeyPath(config.provider, SettingsManager.getExtensionContext() || undefined) :
+        config.sshKeyPath
+      
       const legacyConfig: CloudSyncConfig = {
         provider: config.provider,
         repositoryUrl: config.repositoryUrl,
@@ -287,7 +300,7 @@ export class SettingsWebviewProvider {
         localPath: config.localPath,
         defaultBranch: config.defaultBranch,
         authenticationMethod: config.authenticationMethod,
-        sshKeyPath: config.sshKeyPath,
+        sshKeyPath: sshKeyPath,
         commitMessageTemplate: config.commitMessageTemplate,
         autoSync: false, // 测试时不需要
         syncInterval: 15, // 默认值
@@ -307,8 +320,8 @@ export class SettingsWebviewProvider {
       const cloudSyncManager = new CloudSyncManager(context, storageManager)
       cloudSyncManager.updateConfig(legacyConfig) // 使用转换后的配置
 
-      // console.log('调用testConnection方法...')
-      const result = await cloudSyncManager.testConnection()
+      // console.log('调用test方法...')
+      const result = await cloudSyncManager.test()
       // console.log('连接测试结果:', result)
 
       panel.webview.postMessage({
@@ -413,11 +426,20 @@ export class SettingsWebviewProvider {
       const { StorageManager } = await import('../storage/storageManager')
       const storageManager = new StorageManager(context)
 
+      // 确保SSH密钥路径正确
+      const effectiveConfig = { ...config }
+      if (config.authenticationMethod === 'ssh' && config.provider) {
+        effectiveConfig.sshKeyPath = PathUtils.getSshPrivateKeyPath(
+          config.provider as 'github' | 'gitlab' | 'gitee', 
+          SettingsManager.getExtensionContext() || undefined
+        )
+      }
+      
       const cloudSyncManager = new CloudSyncManager(context, storageManager)
-      cloudSyncManager.updateConfig(config) // 使用最新配置
+      cloudSyncManager.updateConfig(effectiveConfig) // 使用修正后的配置
 
-      // console.log('调用testConnection方法...')
-      const result = await cloudSyncManager.testConnection()
+      // console.log('调用test方法...')
+      const result = await cloudSyncManager.test()
       // console.log('连接测试结果:', result)
 
       panel.webview.postMessage({
@@ -1222,6 +1244,179 @@ export class SettingsWebviewProvider {
     console.warn(`配置注册等待超时 (${maxWaitTime}ms)`)
   }
 
+  /**
+   * 处理SSH密钥上传
+   */
+  private async _uploadSshKey(provider: 'github' | 'gitlab' | 'gitee', panel: vscode.WebviewPanel): Promise<void> {
+    try {
+      // 显示文件选择器
+      const fileUris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: {
+          'SSH Private Keys': ['pem', 'key', 'rsa', 'ed25519'],
+          'All files': ['*']
+        },
+        title: `选择 ${provider.toUpperCase()} 的SSH私钥文件`
+      })
+
+      if (!fileUris || fileUris.length === 0) {
+        panel.webview.postMessage({
+          type: 'sshKeyUploadResult',
+          provider: provider,
+          success: false,
+          message: '用户取消了文件选择'
+        })
+        return
+      }
+
+      const sourceKeyPath = fileUris[0].fsPath
+      
+      // 使用PathUtils复制SSH密钥
+      const result = await PathUtils.copySshKey(sourceKeyPath, provider, SettingsManager.getExtensionContext() || undefined)
+
+      panel.webview.postMessage({
+        type: 'sshKeyUploadResult',
+        provider: provider,
+        success: result.success,
+        message: result.message,
+        keyPath: result.keyPath
+      })
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`${provider.toUpperCase()} SSH私钥选择成功`)
+        
+        // 更新对应平台配置的SSH密钥路径
+        await this._updatePlatformSshKeyPath(provider, result.keyPath!)
+        
+        // 重新发送配置到WebView以更新显示
+        await this._sendConfigToWebview(panel)
+      } else {
+        vscode.window.showErrorMessage(`SSH私钥选择失败: ${result.message}`)
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '选择SSH密钥时发生错误'
+      console.error('SSH密钥选择失败:', error)
+
+      panel.webview.postMessage({
+        type: 'sshKeyUploadResult',
+        provider: provider,
+        success: false,
+        message: errorMessage
+      })
+
+      vscode.window.showErrorMessage(`SSH密钥选择失败: ${errorMessage}`)
+    }
+  }
+
+  /**
+   * 处理SSH密钥删除
+   */
+  private async _deleteSshKey(provider: 'github' | 'gitlab' | 'gitee', panel: vscode.WebviewPanel): Promise<void> {
+    try {
+      // 显示确认对话框
+      const confirmDelete = await vscode.window.showWarningMessage(
+        `确定要删除 ${provider.toUpperCase()} 的SSH私钥吗？此操作不可撤销。`,
+        { modal: true },
+        '确定删除',
+        '取消'
+      )
+
+      if (confirmDelete !== '确定删除') {
+        panel.webview.postMessage({
+          type: 'sshKeyDeleteResult',
+          provider: provider,
+          success: false,
+          message: '用户取消删除操作'
+        })
+        return
+      }
+
+      // 使用PathUtils删除SSH密钥
+      const result = await PathUtils.deleteSshKey(provider, SettingsManager.getExtensionContext() || undefined)
+
+      panel.webview.postMessage({
+        type: 'sshKeyDeleteResult',
+        provider: provider,
+        success: result.success,
+        message: result.message
+      })
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`${provider.toUpperCase()} SSH私钥删除成功`)
+        
+        // 清除对应平台配置的SSH密钥路径
+        await this._updatePlatformSshKeyPath(provider, '')
+        
+        // 重新发送配置到WebView以更新显示
+        await this._sendConfigToWebview(panel)
+      } else {
+        vscode.window.showErrorMessage(`SSH私钥删除失败: ${result.message}`)
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '删除SSH密钥时发生错误'
+      console.error('SSH密钥删除失败:', error)
+
+      panel.webview.postMessage({
+        type: 'sshKeyDeleteResult',
+        provider: provider,
+        success: false,
+        message: errorMessage
+      })
+
+      vscode.window.showErrorMessage(`SSH密钥删除失败: ${errorMessage}`)
+    }
+  }
+
+  /**
+   * 检查SSH密钥状态
+   */
+  private async _checkSshKeyStatus(provider: 'github' | 'gitlab' | 'gitee', panel: vscode.WebviewPanel): Promise<void> {
+    try {
+      const keyInfo = await PathUtils.getSshKeyInfo(provider, SettingsManager.getExtensionContext() || undefined)
+      const validation = keyInfo.exists ? 
+        await PathUtils.validateSshKey(provider, SettingsManager.getExtensionContext() || undefined) :
+        { isValid: false, message: 'SSH私钥文件不存在' }
+
+      panel.webview.postMessage({
+        type: 'sshKeyStatusResult',
+        provider: provider,
+        keyInfo: keyInfo,
+        validation: validation
+      })
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '检查SSH密钥状态时发生错误'
+      console.error('SSH密钥状态检查失败:', error)
+
+      panel.webview.postMessage({
+        type: 'sshKeyStatusResult',
+        provider: provider,
+        error: errorMessage
+      })
+    }
+  }
+
+  /**
+   * 更新平台配置的SSH密钥路径
+   */
+  private async _updatePlatformSshKeyPath(provider: 'github' | 'gitlab' | 'gitee', sshKeyPath: string): Promise<void> {
+    try {
+      const multiConfig = SettingsManager.getMultiPlatformCloudSyncConfig()
+      const platformConfig = multiConfig.platforms.find(p => p.provider === provider)
+      
+      if (platformConfig) {
+        platformConfig.sshKeyPath = sshKeyPath
+        await SettingsManager.updatePlatformConfig(platformConfig)
+      }
+    } catch (error) {
+      console.error(`更新${provider}的SSH密钥路径失败:`, error)
+    }
+  }
+
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
     return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1558,7 +1753,44 @@ export class SettingsWebviewProvider {
             border-radius: 2px;
         }
         
-        /* 移除了模态框相关的样式 */
+        /* SSH密钥管理样式 */
+        .ssh-key-management {
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 4px;
+            padding: 12px;
+            background: var(--vscode-editor-background);
+        }
+        
+        .ssh-key-status {
+            margin-bottom: 12px;
+        }
+        
+        .ssh-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .ssh-indicator {
+            font-size: 16px;
+        }
+        
+        .ssh-key-info {
+            margin-left: 24px;
+            color: var(--vscode-descriptionForeground);
+        }
+        
+        .ssh-key-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .ssh-key-actions .btn {
+            padding: 6px 12px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -1638,9 +1870,27 @@ export class SettingsWebviewProvider {
             </div>
 
             <div class="form-group" id="sshGroup" style="display: none;">
-                <label for="sshKeyPath">SSH密钥路径</label>
-                <input type="text" id="sshKeyPath" placeholder="例如: ~/.ssh/id_rsa">
-                <div class="help-text">SSH私钥文件的路径</div>
+                <label>SSH私钥管理</label>
+                <div id="sshKeyManagement" class="ssh-key-management">
+                    <div id="sshKeyStatus" class="ssh-key-status">
+                        <div class="ssh-status-indicator">
+                            <span id="sshKeyIndicator" class="ssh-indicator">📁</span>
+                            <span id="sshKeyStatusText">检查中...</span>
+                        </div>
+                        <div id="sshKeyInfo" class="ssh-key-info" style="display: none;">
+                            <small id="sshKeyDetails"></small>
+                        </div>
+                    </div>
+                    <div class="ssh-key-actions">
+                        <button id="uploadSshKeyBtn" class="btn btn-secondary" style="display: none;">📁 选择SSH私钥</button>
+                        <button id="replaceSshKeyBtn" class="btn btn-secondary" style="display: none;">🔄 更换私钥</button>
+                        <button id="deleteSshKeyBtn" class="btn btn-danger" style="display: none;">🗑️ 删除私钥</button>
+                    </div>
+                </div>
+                <div class="help-text">
+                    <strong>统一管理:</strong> SSH私钥统一存储在VSCode专用目录中，不同平台自动隔离。<br>
+                    <strong>安全保障:</strong> 所有私钥文件都设置了适当的权限保护。
+                </div>
             </div>
 
             <div class="form-group">
@@ -1752,7 +2002,6 @@ export class SettingsWebviewProvider {
         const defaultBranchInput = document.getElementById('defaultBranch');
         const authenticationMethodSelect = document.getElementById('authenticationMethod');
         const tokenInput = document.getElementById('token');
-        const sshKeyPathInput = document.getElementById('sshKeyPath');
         const commitMessageTemplateInput = document.getElementById('commitMessageTemplate');
         const autoSyncCheckbox = document.getElementById('autoSync');
         const syncIntervalInput = document.getElementById('syncInterval');
@@ -1776,6 +2025,15 @@ export class SettingsWebviewProvider {
         const addGitHubBtn = document.getElementById('addGitHubBtn');
         const addGitLabBtn = document.getElementById('addGitLabBtn');
         const addGiteeBtn = document.getElementById('addGiteeBtn');
+        
+        // SSH密钥管理相关元素
+        const sshKeyIndicator = document.getElementById('sshKeyIndicator');
+        const sshKeyStatusText = document.getElementById('sshKeyStatusText');
+        const sshKeyInfo = document.getElementById('sshKeyInfo');
+        const sshKeyDetails = document.getElementById('sshKeyDetails');
+        const uploadSshKeyBtn = document.getElementById('uploadSshKeyBtn');
+        const replaceSshKeyBtn = document.getElementById('replaceSshKeyBtn');
+        const deleteSshKeyBtn = document.getElementById('deleteSshKeyBtn');
 
         // 简化配置变量
         var defaultLocalPath = '';
@@ -1818,10 +2076,7 @@ export class SettingsWebviewProvider {
             }
         }
 
-        // 平台选择变化
-        providerSelect.addEventListener('change', () => {
-            updatePathDisplay();
-        });
+
 
         // 认证方式切换
         authenticationMethodSelect.addEventListener('change', () => {
@@ -1832,6 +2087,17 @@ export class SettingsWebviewProvider {
             } else if (authMethod === 'ssh') {
                 tokenGroup.style.display = 'none';
                 sshGroup.style.display = 'block';
+                // 检查当前平台的SSH密钥状态
+                checkSshKeyStatus();
+            }
+        });
+
+        // 平台选择变化时也需要检查SSH状态
+        providerSelect.addEventListener('change', () => {
+            updatePathDisplay();
+            // 如果当前认证方式是SSH，检查新平台的SSH密钥状态
+            if (authenticationMethodSelect.value === 'ssh') {
+                checkSshKeyStatus();
             }
         });
 
@@ -1925,7 +2191,7 @@ export class SettingsWebviewProvider {
                 defaultBranch: defaultBranchInput.value.trim() || 'main',
                 authenticationMethod: authenticationMethodSelect.value,
                 token: tokenInput.value.trim(),
-                sshKeyPath: sshKeyPathInput.value.trim(),
+                sshKeyPath: '', // SSH密钥路径由系统自动管理
                 commitMessageTemplate: commitMessageTemplateInput.value.trim() || 'Sync snippets: {timestamp}',
                 autoSync: autoSyncCheckbox.checked,
                 syncInterval: parseInt(syncIntervalInput.value) || 15
@@ -1950,7 +2216,6 @@ export class SettingsWebviewProvider {
             defaultBranchInput.value = config.defaultBranch || 'main';
             authenticationMethodSelect.value = config.authenticationMethod || 'token';
             tokenInput.value = config.token || '';
-            sshKeyPathInput.value = config.sshKeyPath || '';
             commitMessageTemplateInput.value = config.commitMessageTemplate || 'Sync snippets: {timestamp}';
             autoSyncCheckbox.checked = config.autoSync || false;
             syncIntervalInput.value = config.syncInterval || 15;
@@ -2180,6 +2445,114 @@ export class SettingsWebviewProvider {
         // 平台选择器变更事件
         providerSelect.addEventListener('change', loadPlatformConfig);
 
+        // SSH密钥管理功能
+        
+        // 检查SSH密钥状态
+        function checkSshKeyStatus() {
+            const provider = providerSelect.value;
+            if (!provider || !['github', 'gitlab', 'gitee'].includes(provider)) {
+                updateSshKeyUI(null, null);
+                return;
+            }
+            
+            // 发送检查请求到后端
+            vscode.postMessage({
+                type: 'checkSshKeyStatus',
+                provider: provider
+            });
+        }
+        
+        // 更新SSH密钥UI显示
+        function updateSshKeyUI(keyInfo, validation) {
+            if (!keyInfo) {
+                // 重置UI状态
+                sshKeyIndicator.textContent = '📁';
+                sshKeyStatusText.textContent = '检查中...';
+                sshKeyInfo.style.display = 'none';
+                uploadSshKeyBtn.style.display = 'none';
+                replaceSshKeyBtn.style.display = 'none';
+                deleteSshKeyBtn.style.display = 'none';
+                return;
+            }
+            
+            if (keyInfo.exists) {
+                if (validation && validation.isValid) {
+                    // SSH密钥存在且有效
+                    sshKeyIndicator.textContent = '🔑';
+                    sshKeyStatusText.textContent = 'SSH私钥已配置';
+                    sshKeyDetails.textContent = \`文件大小: \${(keyInfo.size / 1024).toFixed(1)}KB, 修改时间: \${new Date(keyInfo.modified).toLocaleString()}\`;
+                    sshKeyInfo.style.display = 'block';
+                    uploadSshKeyBtn.style.display = 'none';
+                    replaceSshKeyBtn.style.display = 'inline-block';
+                    deleteSshKeyBtn.style.display = 'inline-block';
+                } else {
+                    // SSH密钥存在但无效
+                    sshKeyIndicator.textContent = '⚠️';
+                    sshKeyStatusText.textContent = 'SSH私钥无效';
+                    sshKeyDetails.textContent = validation ? validation.message : '密钥文件格式错误';
+                    sshKeyInfo.style.display = 'block';
+                    uploadSshKeyBtn.style.display = 'none';
+                    replaceSshKeyBtn.style.display = 'inline-block';
+                    deleteSshKeyBtn.style.display = 'inline-block';
+                }
+            } else {
+                // SSH密钥不存在
+                sshKeyIndicator.textContent = '📁';
+                sshKeyStatusText.textContent = '未配置SSH私钥';
+                sshKeyInfo.style.display = 'none';
+                uploadSshKeyBtn.style.display = 'inline-block';
+                replaceSshKeyBtn.style.display = 'none';
+                deleteSshKeyBtn.style.display = 'none';
+            }
+        }
+        
+        // 上传SSH密钥
+        function uploadSshKey(provider) {
+            if (!provider) {
+                provider = providerSelect.value;
+            }
+            
+            if (!provider || !['github', 'gitlab', 'gitee'].includes(provider)) {
+                showStatus('请先选择Git平台', 'warning');
+                return;
+            }
+            
+            vscode.postMessage({
+                type: 'uploadSshKey',
+                provider: provider
+            });
+        }
+        
+        // 删除SSH密钥
+        function deleteSshKey(provider) {
+            if (!provider) {
+                provider = providerSelect.value;
+            }
+            
+            if (!provider || !['github', 'gitlab', 'gitee'].includes(provider)) {
+                showStatus('请先选择Git平台', 'warning');
+                return;
+            }
+            
+            vscode.postMessage({
+                type: 'deleteSshKey',
+                provider: provider
+            });
+        }
+        
+        // 绑定SSH密钥管理按钮事件
+        if (uploadSshKeyBtn) {
+            uploadSshKeyBtn.addEventListener('click', () => uploadSshKey());
+        }
+        
+        if (replaceSshKeyBtn) {
+            replaceSshKeyBtn.addEventListener('click', () => uploadSshKey());
+        }
+        
+        if (deleteSshKeyBtn) {
+            deleteSshKeyBtn.addEventListener('click', () => deleteSshKey());
+        }
+
         // 监听来自扩展的消息
         window.addEventListener('message', event => {
             const message = event.data;
@@ -2342,6 +2715,36 @@ export class SettingsWebviewProvider {
                     break;
                 case 'importError':
                     showStatus(message.message, 'error');
+                    break;
+                case 'sshKeyUploadResult':
+                    if (message.success) {
+                        showStatus(\`\${getPlatformName(message.provider)} SSH私钥上传成功\`, 'success');
+                        // 重新检查SSH密钥状态
+                        if (authenticationMethodSelect.value === 'ssh' && providerSelect.value === message.provider) {
+                            checkSshKeyStatus();
+                        }
+                    } else {
+                        showStatus(\`SSH私钥上传失败: \${message.message}\`, 'error');
+                    }
+                    break;
+                case 'sshKeyDeleteResult':
+                    if (message.success) {
+                        showStatus(\`\${getPlatformName(message.provider)} SSH私钥删除成功\`, 'success');
+                        // 重新检查SSH密钥状态
+                        if (authenticationMethodSelect.value === 'ssh' && providerSelect.value === message.provider) {
+                            checkSshKeyStatus();
+                        }
+                    } else {
+                        showStatus(\`SSH私钥删除失败: \${message.message}\`, 'error');
+                    }
+                    break;
+                case 'sshKeyStatusResult':
+                    if (message.error) {
+                        showStatus(\`检查SSH密钥状态失败: \${message.error}\`, 'error');
+                        updateSshKeyUI(null, null);
+                    } else {
+                        updateSshKeyUI(message.keyInfo, message.validation);
+                    }
                     break;
                 case 'saveAllPlatformsResult':
                     restoreButtonStates();

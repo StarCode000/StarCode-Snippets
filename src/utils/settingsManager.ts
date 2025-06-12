@@ -54,7 +54,7 @@ export class SettingsManager {
       localPath: '', // 使用空路径，系统自动管理编辑器特定路径
       defaultBranch: 'main',
       authenticationMethod: 'token',
-      sshKeyPath: '',
+      sshKeyPath: PathUtils.getSshPrivateKeyPath(provider, this.extensionContext || undefined), // 使用统一管理的SSH密钥路径
       commitMessageTemplate: 'Sync snippets: {timestamp}',
       isActive: false
     }
@@ -645,8 +645,24 @@ export class SettingsManager {
       errors.push('使用令牌认证时，访问令牌不能为空')
     }
 
-    if (config.authenticationMethod === 'ssh' && !config.sshKeyPath.trim()) {
-      errors.push('使用SSH认证时，SSH密钥路径不能为空')
+    if (config.authenticationMethod === 'ssh') {
+      // 检查统一管理的SSH密钥是否存在
+      const provider = config.provider as 'github' | 'gitlab' | 'gitee'
+      if (provider && ['github', 'gitlab', 'gitee'].includes(provider)) {
+        try {
+          const keyExists = PathUtils.checkSshKeyExists(provider, this.extensionContext || undefined)
+          if (!keyExists) {
+            errors.push(`使用SSH认证时，请先选择 ${provider.toUpperCase()} 的SSH私钥`)
+          }
+        } catch (error) {
+          // 如果检查失败，仍然使用旧的验证逻辑作为后备
+          if (!config.sshKeyPath.trim()) {
+            errors.push('使用SSH认证时，SSH密钥路径不能为空')
+          }
+        }
+      } else if (!config.sshKeyPath.trim()) {
+        errors.push('使用SSH认证时，SSH密钥路径不能为空')
+      }
     }
 
     if (config.syncInterval <= 0) {
@@ -705,8 +721,24 @@ export class SettingsManager {
       errors.push('使用令牌认证时，访问令牌不能为空')
     }
 
-    if (config.authenticationMethod === 'ssh' && !config.sshKeyPath.trim()) {
-      errors.push('使用SSH认证时，SSH密钥路径不能为空')
+    if (config.authenticationMethod === 'ssh') {
+      // 检查统一管理的SSH密钥是否存在
+      const provider = config.provider as 'github' | 'gitlab' | 'gitee'
+      if (provider && ['github', 'gitlab', 'gitee'].includes(provider)) {
+        try {
+          const keyExists = PathUtils.checkSshKeyExists(provider, this.extensionContext || undefined)
+          if (!keyExists) {
+            errors.push(`使用SSH认证时，请先选择 ${provider.toUpperCase()} 的SSH私钥`)
+          }
+        } catch (error) {
+          // 如果检查失败，仍然使用旧的验证逻辑作为后备
+          if (!config.sshKeyPath.trim()) {
+            errors.push('使用SSH认证时，SSH密钥路径不能为空')
+          }
+        }
+      } else if (!config.sshKeyPath.trim()) {
+        errors.push('使用SSH认证时，SSH密钥路径不能为空')
+      }
     }
 
     return {
