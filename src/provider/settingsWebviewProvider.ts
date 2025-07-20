@@ -665,9 +665,62 @@ export class SettingsWebviewProvider {
       })
 
       if (result.success) {
+                 // 【修复】同步成功后，检查并更新VSCode本地存储
+         try {
+           console.log('🔄 检查是否需要更新VSCode本地存储...')
+           
+           // 读取Git仓库中的最新数据
+           const latestData = await cloudSyncManager.readDataFromGitRepo()
+           
+           // 获取当前VSCode存储的数据  
+           const currentVSCodeSnippets = await storageContext.getAllSnippets()
+           const currentVSCodeDirectories = await storageContext.getAllDirectories()
+           
+           // 简单比较数据是否一致
+           const snippetsMatch = currentVSCodeSnippets.length === latestData.snippets.length &&
+                                currentVSCodeSnippets.every(local => 
+                                  latestData.snippets.some(git => 
+                                    git.fullPath === local.fullPath && 
+                                    git.name === local.name &&
+                                    git.code === local.code &&
+                                    git.language === local.language
+                                  )
+                                )
+           
+           const directoriesMatch = currentVSCodeDirectories.length === latestData.directories.length &&
+                                   currentVSCodeDirectories.every(local =>
+                                     latestData.directories.some(git =>
+                                       git.fullPath === local.fullPath &&
+                                       git.name === local.name
+                                     )
+                                   )
+           
+           if (!snippetsMatch || !directoriesMatch) {
+             console.log('📝 检测到Git仓库有更新的数据，正在更新VSCode存储...')
+             
+             // 使用CloudOperationsManager的强制导入功能
+             const { CloudOperationsManager } = await import('../utils/sync/cloudOperationsManager')
+             const cloudOpsManager = new CloudOperationsManager(context, storageManager)
+             
+             const importResult = await cloudOpsManager.forceImportFromGitRepo()
+             
+             if (importResult.success) {
+               console.log('✅ VSCode存储已更新到最新状态')
+               vscode.window.showInformationMessage(`手动同步成功: ${result.message}\n\n✨ 已更新VSCode存储到最新状态`)
+             } else {
+               console.warn('⚠️ VSCode存储更新失败:', importResult.message)
+               vscode.window.showInformationMessage(`手动同步成功: ${result.message}\n\n⚠️ 但VSCode存储更新失败: ${importResult.message}`)
+             }
+           } else {
+             console.log('✅ VSCode存储已是最新状态')
         vscode.window.showInformationMessage(`手动同步成功: ${result.message}`)
+           }
+         } catch (updateError) {
+           console.error('❌ 检查VSCode存储更新失败:', updateError)
+           vscode.window.showInformationMessage(`手动同步成功: ${result.message}\n\n⚠️ 但检查VSCode存储更新时出错: ${updateError instanceof Error ? updateError.message : '未知错误'}`)
+         }
         
-        // 手动同步成功后刷新树视图
+        // 手动同步完成后刷新树视图
         setTimeout(() => {
           vscode.commands.executeCommand('starcode-snippets.refreshExplorer')
         }, 500)

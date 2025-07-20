@@ -199,17 +199,23 @@ export class CloudOperationsManager {
       // 3. 强制写入本地数据（始终更新时间戳）
       await this.fileSystemManager.writeToGit(currentSnippets, currentDirectories)
       
-      // 4. 检查是否有变更需要提交
+      // 4. 【修复】强制添加所有文件，确保强制推送的变更被正确提交
+      await this.gitOpsManager.gitAddAll()
+      
+      // 5. 检查暂存区是否有变更需要提交
       const gitStatus = await this.gitOpsManager.gitStatus()
-      const hasChanges = gitStatus.files.length > 0
+      const hasChanges = gitStatus.staged.length > 0 || 
+                       gitStatus.created.length > 0 || 
+                       gitStatus.modified.length > 0 || 
+                       gitStatus.deleted.length > 0 ||
+                       gitStatus.renamed.length > 0
       
       if (hasChanges) {
-        // 5. 添加所有变更并提交
-        await this.gitOpsManager.gitAddAll()
+        // 6. 提交变更
         const commitMessage = this.gitOpsManager.generateCommitMessage() + ' [FORCE PUSH]'
         await this.gitOpsManager.gitCommit(commitMessage)
       } else {
-        // 如果没有变更，创建一个空提交以确保推送
+        // 如果暂存区没有变更，创建一个空提交以确保推送
         const emptyCommitMessage = this.gitOpsManager.generateCommitMessage() + ' [FORCE PUSH - NO CHANGES]'
         await git.commit(emptyCommitMessage, ['--allow-empty'])
       }

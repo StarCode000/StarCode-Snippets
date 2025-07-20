@@ -39,6 +39,7 @@ export class GitOperationsManager {
 
   /**
    * 初始化或打开本地Git仓库
+   * 【重要修复】智能选择初始化还是克隆远程仓库
    */
   private async initOrOpenLocalRepo(): Promise<SimpleGit> {
     // 获取有效的本地路径，优先使用配置的路径，否则使用默认路径
@@ -55,12 +56,159 @@ export class GitOperationsManager {
     const isRepo = await git.checkIsRepo()
     
     if (!isRepo) {
-      await this.initializeNewRepository(git, effectiveLocalPath)
+      // 【重要修复】本地仓库不存在时，优先尝试从远程克隆
+      await this.smartInitializeRepository(git, effectiveLocalPath)
     } else {
       await this.validateExistingRepository(git)
     }
 
     return git
+  }
+
+  /**
+   * 【新增】智能初始化仓库：优先克隆远程，否则初始化新仓库
+   */
+  private async smartInitializeRepository(git: SimpleGit, repoPath: string): Promise<void> {
+    console.log('🔍 智能初始化仓库：检查远程仓库状态...')
+    
+    try {
+      // 第一步：尝试检查远程仓库是否存在
+      const tempGit = simpleGit()
+      let remoteHasData = false
+      
+      try {
+        console.log('📡 检查远程仓库是否有数据...')
+        const remoteRefs = await tempGit.listRemote(['--heads', this.config.repositoryUrl])
+        remoteHasData = !!(remoteRefs && remoteRefs.trim())
+        console.log(`   远程仓库状态: ${remoteHasData ? '有数据' : '无数据/不存在'}`)
+      } catch (remoteCheckError) {
+        console.log('   远程仓库检查失败，将初始化新仓库')
+        remoteHasData = false
+      }
+      
+      if (remoteHasData) {
+        // 第二步：远程有数据，克隆远程仓库
+        console.log('🔄 远程仓库有数据，开始克隆...')
+        await this.cloneFromRemote(repoPath)
+      } else {
+        // 第三步：远程无数据，初始化新仓库
+        console.log('📝 远程仓库无数据，初始化新仓库...')
+        await this.initializeNewRepository(git, repoPath)
+      }
+    } catch (error) {
+      console.warn('智能初始化失败，回退到普通初始化:', error)
+      // 如果智能初始化失败，回退到原来的逻辑
+      await this.initializeNewRepository(git, repoPath)
+    }
+  }
+
+  /**
+   * 【新增】从远程仓库克隆
+   */
+  private async cloneFromRemote(repoPath: string): Promise<void> {
+    try {
+      const targetBranch = this.config.defaultBranch || 'main'
+      
+      // 准备克隆URL（包含认证信息）
+      let cloneUrl = this.config.repositoryUrl
+      if (this.config.authenticationMethod === 'token' && this.config.token) {
+        cloneUrl = this.embedTokenInUrl(this.config.repositoryUrl, this.config.token)
+      }
+      
+      console.log(`📥 开始克隆远程仓库到: ${repoPath}`)
+      console.log(`   目标分支: ${targetBranch}`)
+      
+      // 删除目标目录的内容（保留目录本身）
+      if (fs.existsSync(repoPath)) {
+        const entries = fs.readdirSync(repoPath)
+        for (const entry of entries) {
+          const entryPath = path.join(repoPath, entry)
+          if (fs.statSync(entryPath).isDirectory()) {
+            await this.deleteDirectory(entryPath)
+          } else {
+            fs.unlinkSync(entryPath)
+          }
+        }
+      }
+      
+      // 使用 simple-git 克隆仓库
+      const tempGit = simpleGit()
+      await tempGit.clone(cloneUrl, repoPath, [
+        '--branch', targetBranch,
+        '--single-branch'
+      ])
+      
+      console.log('✅ 远程仓库克隆成功')
+      
+      // 设置用户配置
+      const git = simpleGit(repoPath)
+      try {
+        await git.addConfig('user.name', 'StarCode Snippets')
+        await git.addConfig('user.email', 'starcode-snippets@local')
+      } catch (configError) {
+        console.warn('设置Git用户配置失败:', configError)
+      }
+      
+    } catch (cloneError) {
+      console.error('克隆远程仓库失败:', cloneError)
+      
+      // 如果克隆失败，尝试其他分支
+      const alternativeBranches = ['master', 'main']
+      const targetBranch = this.config.defaultBranch || 'main'
+      
+      for (const branch of alternativeBranches) {
+        if (branch === targetBranch) continue // 跳过已经尝试过的分支
+        
+        try {
+          console.log(`🔄 尝试克隆分支: ${branch}`)
+          let cloneUrl = this.config.repositoryUrl
+          if (this.config.authenticationMethod === 'token' && this.config.token) {
+            cloneUrl = this.embedTokenInUrl(this.config.repositoryUrl, this.config.token)
+          }
+          
+          // 清理目录
+          if (fs.existsSync(repoPath)) {
+            const entries = fs.readdirSync(repoPath)
+            for (const entry of entries) {
+              const entryPath = path.join(repoPath, entry)
+              if (fs.statSync(entryPath).isDirectory()) {
+                await this.deleteDirectory(entryPath)
+              } else {
+                fs.unlinkSync(entryPath)
+              }
+            }
+          }
+          
+          const tempGit = simpleGit()
+          await tempGit.clone(cloneUrl, repoPath, [
+            '--branch', branch,
+            '--single-branch'
+          ])
+          
+          console.log(`✅ 成功克隆分支 ${branch}`)
+          
+          // 如果成功但分支不是目标分支，切换分支
+          if (branch !== targetBranch) {
+            const git = simpleGit(repoPath)
+            try {
+              await git.checkoutLocalBranch(targetBranch)
+              console.log(`✅ 已切换到目标分支: ${targetBranch}`)
+            } catch (branchError) {
+              console.warn(`切换到目标分支失败，继续使用 ${branch}:`, branchError)
+            }
+          }
+          
+          return // 成功克隆，退出函数
+          
+        } catch (alternativeError) {
+          console.warn(`克隆分支 ${branch} 失败:`, alternativeError)
+          continue
+        }
+      }
+      
+      // 所有克隆尝试都失败
+      throw new Error(`无法克隆远程仓库，已尝试分支: ${[targetBranch, ...alternativeBranches].join(', ')}。原始错误: ${cloneError}`)
+    }
   }
 
   /**

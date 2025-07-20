@@ -184,55 +184,67 @@ export class DataSyncManager {
         }
       } else {
         // 正常情况：本地有数据，或远程为空，或两者都为空
-        console.log('✅ 数据安全检查通过，执行正常写入...')
-        await fileSystemManager.writeToGit(localSnippets, localDirectories)
+        console.log('✅ 数据安全检查通过，但先检查是否真的需要写入...')
+        
+        // 【修复】先检查VSCode数据与Git仓库数据是否一致，避免不必要的覆盖
+        try {
+          const currentGitData = await fileSystemManager.readFromGit()
+                     const needsWrite = this.checkIfVSCodeDataDiffersFromGit(
+             localSnippets, localDirectories,
+             currentGitData.snippets, currentGitData.directories
+           )
+          
+          if (needsWrite) {
+            console.log('📝 检测到VSCode数据与Git仓库不一致，执行写入...')
+            await fileSystemManager.writeToGit(localSnippets, localDirectories)
+          } else {
+            console.log('✅ VSCode数据与Git仓库已一致，跳过写入')
+          }
+        } catch (checkError) {
+          console.warn('⚠️ 检查数据一致性失败，执行安全写入...', checkError)
+          await fileSystemManager.writeToGit(localSnippets, localDirectories)
+        }
       }
       
-      // 检查写入后是否有新的更改（只在实际写入数据后检查）
+      // 【修复】检查写入后是否有新的更改（只在实际写入数据后检查）
       let hasChangesToCommit = false
       
       if (!isEmptyLocalData || !hasRemoteData || 
           (isEmptyLocalData && hasRemoteData && userConfirmation === '强制覆盖远程数据')) {
+        
+        // 【修复】强制添加所有文件到暂存区，确保变更被Git跟踪
+        console.log('📝 强制添加所有文件到暂存区...')
+        await gitOpsManager.gitAddAll()
+        
+        // 检查暂存区状态而不是工作区状态
         const statusAfterWrite = await gitOpsManager.gitStatus()
-        hasChangesToCommit = statusAfterWrite.files.length > 0
+        hasChangesToCommit = statusAfterWrite.staged.length > 0 || 
+                           statusAfterWrite.created.length > 0 || 
+                           statusAfterWrite.modified.length > 0 || 
+                           statusAfterWrite.deleted.length > 0 ||
+                           statusAfterWrite.renamed.length > 0
         
         if (hasChangesToCommit) {
-          console.log(`   检测到需要提交的更改: ${statusAfterWrite.files.length} 个文件`)
+          console.log(`   检测到需要提交的暂存更改`)
 
-          // 添加所有更改到暂存区
-          await gitOpsManager.gitAddAll()
-          
-          // 【修复】在提交前再次检查是否真的有变更
-          const statusAfterStaging = await gitOpsManager.gitStatus()
-          
-          // 【优化】使用更可靠的方法检查是否有变更
-          const hasRealChanges = statusAfterStaging.staged.length > 0 || 
-                                statusAfterStaging.created.length > 0 || 
-                                statusAfterStaging.modified.length > 0 || 
-                                statusAfterStaging.deleted.length > 0 ||
-                                statusAfterStaging.renamed.length > 0
-          
-          if (hasRealChanges) {
-            try {
-              // 提交更改
-              const commitMessage = `同步本地更改: ${new Date().toLocaleString()}`
-              await gitOpsManager.gitCommit(commitMessage)
-              console.log(`✅ 已提交本地更改: ${commitMessage}`)
-            } catch (commitError) {
-              const errorMessage = commitError instanceof Error ? commitError.message : '未知错误'
-              
-              // 如果是"没有变更需要提交"的错误，这是正常的，继续执行
-              if (errorMessage.includes('nothing to commit') || 
-                  errorMessage.includes('no changes added') ||
-                  errorMessage.includes('没有变更需要提交')) {
-                console.log('✅ Git确认无变更需要提交，继续后续流程')
-              } else {
-                // 其他提交错误需要抛出
-                throw commitError
-              }
+          // 【修复】此时文件已经添加到暂存区，直接提交即可
+          try {
+            // 提交更改
+            const commitMessage = `同步本地更改: ${new Date().toLocaleString()}`
+            await gitOpsManager.gitCommit(commitMessage)
+            console.log(`✅ 已提交本地更改: ${commitMessage}`)
+          } catch (commitError) {
+            const errorMessage = commitError instanceof Error ? commitError.message : '未知错误'
+            
+            // 如果是"没有变更需要提交"的错误，这是正常的，继续执行
+            if (errorMessage.includes('nothing to commit') || 
+                errorMessage.includes('no changes added') ||
+                errorMessage.includes('没有变更需要提交')) {
+              console.log('✅ Git确认无变更需要提交，继续后续流程')
+            } else {
+              // 其他提交错误需要抛出
+              throw commitError
             }
-          } else {
-            console.log('✅ 文件已暂存但无实际变更，跳过提交步骤')
           }
         } else {
           console.log('✅ 工作区数据已是最新，无需提交')
@@ -308,14 +320,34 @@ export class DataSyncManager {
             // MERGE_HEAD不存在，可以正常进行合并
           }
           
-          // 【改进】使用更精确的合并控制：先fetch，再merge
+                    // 【改进】使用更精确的合并控制：先fetch，再merge
           console.log('🔄 开始Git标准合并流程: fetch + merge...')
           await gitOpsManager.gitFetch()
           
-                     const config = SettingsManager.getCloudSyncConfig()
-           const targetBranch = config.defaultBranch || 'main'
-          await git.merge([`origin/${targetBranch}`])
-          console.log('✅ Git合并完成')
+          const config = SettingsManager.getCloudSyncConfig()
+          const targetBranch = config.defaultBranch || 'main'
+          
+          try {
+            await git.merge([`origin/${targetBranch}`])
+            console.log('✅ Git合并完成')
+          } catch (mergeError) {
+            const errorMessage = mergeError instanceof Error ? mergeError.message : '未知错误'
+            
+            // 【重要修复】处理 "unrelated histories" 错误
+            if (errorMessage.includes('refusing to merge unrelated histories')) {
+              console.log('⚠️ 检测到不相关历史记录，使用--allow-unrelated-histories重试合并...')
+              try {
+                await git.merge([`origin/${targetBranch}`, '--allow-unrelated-histories'])
+                console.log('✅ 使用--allow-unrelated-histories合并成功')
+              } catch (retryError) {
+                console.error('❌ 即使使用--allow-unrelated-histories也无法合并:', retryError)
+                throw new Error(`Git历史冲突无法自动解决：\n\n原因：本地仓库和远程仓库有不同的Git历史记录\n\n解决方案：\n1. 使用"重新初始化仓库"命令（推荐）\n2. 手动删除本地Git仓库目录后重新同步\n\n技术详情：\n原始错误: ${errorMessage}\n重试错误: ${retryError}`)
+              }
+            } else {
+              // 其他类型的合并错误，直接抛出
+              throw mergeError
+            }
+          }
 
           // 合并后，需要重新读取合并结果并更新VSCode
           const mergedData = await fileSystemManager.readFromGit()
@@ -465,12 +497,13 @@ export class DataSyncManager {
             console.log(`   总体一致: ${isDataConsistent}`)
             
             if (isDataConsistent) {
-              // 真正的数据一致：VSCode存储 = Git仓库 = 远程仓库
-              console.log('✅ 确认数据一致性：VSCode存储与Git仓库数据完全一致，无需推送')
-              return {
-                success: true,
-                message: '✅ 同步完成：本地和远程数据已保持一致，无需推送'
-              }
+              // VSCode存储与本地Git仓库一致，但仍需检查是否需要推送到远程
+              console.log('✅ 确认VSCode存储与Git仓库数据一致')
+              
+              // 【重要修复】即使数据一致，仍然需要执行推送，确保本地提交同步到远程
+              // 因为在前面步骤2中可能已经产生了新的本地提交
+              console.log('🔍 数据一致，但仍需执行推送确保本地提交同步到远程')
+              // 继续执行推送逻辑（不要return）
             } else {
               // 数据不一致：需要重新写入Git并推送
               console.log('⚠️ 检测到VSCode存储与Git仓库核心数据不一致，需要同步到Git')
@@ -504,11 +537,20 @@ export class DataSyncManager {
               // 重新写入最新的VSCode数据到Git
               await fileSystemManager.writeToGit(localSnippets, localDirectories)
               
-              // 检查写入后是否有变更需要提交
-              const statusAfterSync = await gitOpsManager.gitStatus()
-              if (statusAfterSync.files.length > 0) {
+              // 【修复】强制添加所有文件，确保变更被Git跟踪
+              console.log('📝 强制添加所有文件到Git暂存区...')
+              await gitOpsManager.gitAddAll()
+              
+              // 检查暂存区是否有变更需要提交
+              const statusAfterStaging = await gitOpsManager.gitStatus()
+              const hasChangesToCommit = statusAfterStaging.staged.length > 0 || 
+                                       statusAfterStaging.created.length > 0 || 
+                                       statusAfterStaging.modified.length > 0 || 
+                                       statusAfterStaging.deleted.length > 0 ||
+                                       statusAfterStaging.renamed.length > 0
+              
+              if (hasChangesToCommit) {
                 console.log('📝 提交VSCode数据到Git仓库...')
-                await gitOpsManager.gitAddAll()
                 const commitMessage = `同步VSCode最新数据: ${new Date().toLocaleString()}`
                 await gitOpsManager.gitCommit(commitMessage)
                 console.log(`✅ 已提交: ${commitMessage}`)
@@ -516,8 +558,8 @@ export class DataSyncManager {
                 // 继续推送流程
                 console.log('📤 推送更新后的数据到远程...')
               } else {
-                console.log('🔍 数据写入后Git状态未变化，可能是路径映射问题')
-                // 即使Git状态没变化，也说明数据已同步，可以继续
+                console.log('🔍 暂存区无变更，数据可能已是最新状态')
+                // 即使没有新提交，也要确保推送现有的本地提交
               }
             }
           } catch (consistencyCheckError) {
@@ -526,9 +568,17 @@ export class DataSyncManager {
             console.log('🔄 一致性检查失败，执行安全同步...')
             await fileSystemManager.writeToGit(localSnippets, localDirectories)
             
-            const statusAfterSafeSync = await gitOpsManager.gitStatus()
-            if (statusAfterSafeSync.files.length > 0) {
-              await gitOpsManager.gitAddAll()
+            // 【修复】强制添加所有文件，确保安全同步也被正确提交
+            await gitOpsManager.gitAddAll()
+            
+            const statusAfterSafeStaging = await gitOpsManager.gitStatus()
+            const hasSafeChangesToCommit = statusAfterSafeStaging.staged.length > 0 || 
+                                         statusAfterSafeStaging.created.length > 0 || 
+                                         statusAfterSafeStaging.modified.length > 0 || 
+                                         statusAfterSafeStaging.deleted.length > 0 ||
+                                         statusAfterSafeStaging.renamed.length > 0
+            
+            if (hasSafeChangesToCommit) {
               const safeCommitMessage = `安全同步VSCode数据: ${new Date().toLocaleString()}`
               await gitOpsManager.gitCommit(safeCommitMessage)
               console.log(`✅ 安全同步已提交: ${safeCommitMessage}`)
@@ -985,6 +1035,108 @@ export class DataSyncManager {
   }
 
   /**
+   * 检查VSCode数据是否与Git仓库数据不同
+   */
+  private checkIfVSCodeDataDiffersFromGit(
+    vscodeSnippets: CodeSnippet[],
+    vscodeDirectories: Directory[],
+    gitSnippets: CodeSnippet[],
+    gitDirectories: Directory[]
+  ): boolean {
+    // 使用相同的规范化逻辑进行比较
+    const normalizeSnippetForComparison = (snippet: CodeSnippet) => ({
+      name: snippet.name,
+      code: snippet.code,
+      language: snippet.language,
+      fullPath: snippet.fullPath,
+      filePath: snippet.filePath || '',
+      category: snippet.category || ''
+    })
+    
+    const normalizeDirectoryForComparison = (dir: Directory) => ({
+      name: dir.name,
+      fullPath: dir.fullPath
+    })
+    
+    // 规范化并排序
+    const vscodeNormalizedSnippets = vscodeSnippets
+      .map(normalizeSnippetForComparison)
+      .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
+    
+    const vscodeNormalizedDirectories = vscodeDirectories
+      .map(normalizeDirectoryForComparison)
+      .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
+    
+    const gitNormalizedSnippets = gitSnippets
+      .map(normalizeSnippetForComparison)
+      .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
+    
+    const gitNormalizedDirectories = gitDirectories
+      .map(normalizeDirectoryForComparison)
+      .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
+    
+    // 比较是否一致
+    const snippetsMatch = JSON.stringify(vscodeNormalizedSnippets) === JSON.stringify(gitNormalizedSnippets)
+    const directoriesMatch = JSON.stringify(vscodeNormalizedDirectories) === JSON.stringify(gitNormalizedDirectories)
+    
+    const hasDifference = !snippetsMatch || !directoriesMatch
+    
+    // 【调试】总是输出比较结果，不管是否有差异
+    console.log('🔍 VSCode与Git仓库数据比较结果:')
+    console.log(`   VSCode: ${vscodeSnippets.length} 个代码片段, ${vscodeDirectories.length} 个目录`)
+    console.log(`   Git仓库: ${gitSnippets.length} 个代码片段, ${gitDirectories.length} 个目录`)
+    console.log(`   代码片段一致: ${snippetsMatch}`)
+    console.log(`   目录一致: ${directoriesMatch}`)
+    console.log(`   是否有差异: ${hasDifference}`)
+    
+    // 详细分析每个代码片段的比较结果
+    if (vscodeNormalizedSnippets.length > 0 || gitNormalizedSnippets.length > 0) {
+      console.log('📋 详细代码片段比较:')
+      for (let i = 0; i < Math.max(vscodeNormalizedSnippets.length, gitNormalizedSnippets.length); i++) {
+        const vscodeSnippet = vscodeNormalizedSnippets[i]
+        const gitSnippet = gitNormalizedSnippets[i]
+        
+        if (!vscodeSnippet) {
+          console.log(`   ${i + 1}. Git额外: ${gitSnippet.fullPath}`)
+        } else if (!gitSnippet) {
+          console.log(`   ${i + 1}. VSCode额外: ${vscodeSnippet.fullPath}`)
+        } else {
+          const isIdentical = JSON.stringify(vscodeSnippet) === JSON.stringify(gitSnippet)
+          console.log(`   ${i + 1}. 片段: ${vscodeSnippet.fullPath} - ${isIdentical ? '完全一致' : '有差异'}`)
+          
+          if (!isIdentical) {
+            if (vscodeSnippet.name !== gitSnippet.name) {
+              console.log(`       名称: "${vscodeSnippet.name}" vs "${gitSnippet.name}"`)
+            }
+            if (vscodeSnippet.language !== gitSnippet.language) {
+              console.log(`       语言: "${vscodeSnippet.language}" vs "${gitSnippet.language}"`)
+            }
+            if (vscodeSnippet.code !== gitSnippet.code) {
+              console.log(`       内容长度: ${vscodeSnippet.code?.length || 0} vs ${gitSnippet.code?.length || 0}`)
+              // 显示开头和结尾的差异以便调试
+              const vscodeStart = (vscodeSnippet.code || '').substring(0, 30)
+              const gitStart = (gitSnippet.code || '').substring(0, 30)
+              const vscodeEnd = (vscodeSnippet.code || '').slice(-30)
+              const gitEnd = (gitSnippet.code || '').slice(-30)
+              console.log(`       VSCode开头: "${vscodeStart}"`)
+              console.log(`       Git开头:    "${gitStart}"`)
+              console.log(`       VSCode结尾: "${vscodeEnd}"`)
+              console.log(`       Git结尾:    "${gitEnd}"`)
+              
+              // 检查是否是开头空行差异
+              if (vscodeSnippet.code?.charAt(0) !== gitSnippet.code?.charAt(0)) {
+                console.log(`       ⚠️ 开头字符不同: VSCode="${vscodeSnippet.code?.charAt(0)}" vs Git="${gitSnippet.code?.charAt(0)}"`)
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return hasDifference
+  }
+
+  /**
    * 合并代码片段（使用fullPath作为唯一标识）
    * 修复删除同步问题：正确处理本地删除、远程删除和双向修改
    */
@@ -1142,8 +1294,8 @@ export class DataSyncManager {
       if (localDirectory && remoteDirectory) {
         // 两边都存在：检查是否有内容差异
         if (this.hasDirectoryContentDifference(localDirectory, remoteDirectory)) {
-          // 有内容差异，自动选择较新的（或使用远程版本）
-          const resolution = 'use_remote' // 默认使用远程版本
+          // 【修复】有内容差异时，优先保护本地数据
+          const resolution = 'use_local' // 默认保护本地数据
 
           conflicts.push({
             id: fullPath,
@@ -1154,7 +1306,7 @@ export class DataSyncManager {
             needsManualMerge: false,
           })
 
-          merged.push(remoteDirectory)
+          merged.push(localDirectory) // 保护本地数据
         } else {
           // 没有差异，保留本地版本（本地和远程内容相同）
           merged.push(localDirectory)
@@ -1763,11 +1915,31 @@ export class DataSyncManager {
         // 直接用本地数据覆盖远程，跳过合并
         await fileSystemManager.writeToGit(localSnippets, localDirectories)
         
-        const statusAfterWrite = await gitOpsManager.gitStatus()
-        if (statusAfterWrite.files.length > 0) {
-          await gitOpsManager.gitAddAll()
+        // 【修复】强制添加所有文件，确保强制本地模式的变更被正确提交
+        await gitOpsManager.gitAddAll()
+        
+        const statusAfterStaging = await gitOpsManager.gitStatus()
+        const hasChangesToCommit = statusAfterStaging.staged.length > 0 || 
+                                 statusAfterStaging.created.length > 0 || 
+                                 statusAfterStaging.modified.length > 0 || 
+                                 statusAfterStaging.deleted.length > 0 ||
+                                 statusAfterStaging.renamed.length > 0
+        
+        if (hasChangesToCommit) {
           await gitOpsManager.gitCommit(`强制使用本地数据: ${new Date().toLocaleString()}`)
           await gitOpsManager.gitPush()
+        } else {
+          console.log('🔍 强制本地模式：暂存区无变更，可能数据已一致')
+          // 即使没有新提交，也要确保推送现有的本地提交
+          try {
+            await gitOpsManager.gitPush()
+          } catch (pushError) {
+            // 如果推送失败且原因是没有变更，这是正常的
+            const errorMessage = pushError instanceof Error ? pushError.message : '未知错误'
+            if (!errorMessage.includes('up to date') && !errorMessage.includes('up-to-date')) {
+              throw pushError
+            }
+          }
         }
         
         return {
@@ -1867,22 +2039,27 @@ export class DataSyncManager {
       // 将当前VSCode中的数据写入Git工作区
       await fileSystemManager.writeToGit(localSnippets, localDirectories)
       
-      // 检查写入后是否有新的更改
-      const statusAfterWrite = await gitOpsManager.gitStatus()
-      const hasChangesToCommit = statusAfterWrite.files.length > 0
+      // 【修复】强制添加所有文件，确保重新初始化的变更被正确提交
+      console.log('📝 强制添加所有文件到Git暂存区...')
+      await gitOpsManager.gitAddAll()
+      
+      // 检查暂存区是否有变更需要提交
+      const statusAfterStaging = await gitOpsManager.gitStatus()
+      const hasChangesToCommit = statusAfterStaging.staged.length > 0 || 
+                               statusAfterStaging.created.length > 0 || 
+                               statusAfterStaging.modified.length > 0 || 
+                               statusAfterStaging.deleted.length > 0 ||
+                               statusAfterStaging.renamed.length > 0
       
       if (hasChangesToCommit) {
-        console.log(`   检测到需要提交的本地更改: ${statusAfterWrite.files.length} 个文件`)
-
-        // 添加所有更改到暂存区
-        await gitOpsManager.gitAddAll()
+        console.log(`   检测到需要提交的暂存更改`)
         
         // 创建合并提交
         const commitMessage = `重新初始化后合并本地数据: ${new Date().toLocaleString()}`
         await gitOpsManager.gitCommit(commitMessage)
         console.log(`✅ 已创建合并提交: ${commitMessage}`)
       } else {
-        console.log('✅ 本地数据与远程数据一致，无需额外提交')
+        console.log('✅ 暂存区无变更，本地数据与Git仓库一致')
       }
 
       // 【重新初始化策略】步骤3: 推送合并结果到远程
@@ -1985,27 +2162,23 @@ export class DataSyncManager {
           return false // 使用标准同步流程，会进行智能合并
         }
         
-        // 如果远程有数据，但本地提交很少（< 3个），并且本地工作区为空，并且VSCode数据也很少
-        // 这才是真正的重新初始化场景
-        if (localCommitCount < 3 && !hasLocalFiles && localVSCodeDataCount < 5) {
-          console.log('🔄 检测结果: 本地仓库可能被删除并重新初始化')
-          console.log(`   理由: 远程有数据，本地提交很少(${localCommitCount})，工作区为空，VSCode数据较少(${localVSCodeDataCount}项)`)
+        // 【修复】大幅提高重新初始化的检测门槛，保护用户数据
+        // 只有在以下极其严格的条件下才认为是重新初始化：
+        // 1. 本地完全没有提交历史（0个提交）
+        // 2. 并且VSCode中没有任何数据（0项）
+        // 3. 并且工作区完全为空
+        if (localCommitCount === 0 && !hasLocalFiles && localVSCodeDataCount === 0) {
+          console.log('🔄 检测结果: 确认为全新仓库重新初始化')
+          console.log(`   理由: 本地无提交(${localCommitCount})，工作区为空，VSCode无数据(${localVSCodeDataCount}项)`)
           return true
         }
         
-        // 额外检查：如果是全新仓库但VSCode数据不多，也可能是重新初始化
-        if (localCommitCount <= 1 && localVSCodeDataCount < 3) {
-          console.log('🔄 检测结果: 本地仓库可能是新建的，且本地数据较少')
-          console.log(`   理由: 本地提交数量过少(${localCommitCount})，VSCode数据较少(${localVSCodeDataCount}项)`)
-          return true
-        }
+        // 【重要】任何其他情况都使用标准同步流程，进行保守的智能合并
+        console.log('🛡️ 检测结果: 为保护用户数据，使用标准同步流程')
+        console.log(`   数据状况: 本地提交(${localCommitCount})，工作区文件(${gitStatus.files.length})，VSCode数据(${localVSCodeDataCount}项)`)
+        return false
         
-        // 如果有一定数量的本地数据，优先保护用户数据
-        if (localVSCodeDataCount >= 3) {
-          console.log('🛡️ 检测结果: 发现本地数据，为保护用户数据使用标准同步流程')
-          console.log(`   理由: VSCode中有 ${localVSCodeDataCount} 项本地数据，需要进行智能合并`)
-          return false
-        }
+        // 【已移除】不再有额外的宽松检查，避免误判
       } else {
         console.log('   远程仓库: 无数据或为空')
       }

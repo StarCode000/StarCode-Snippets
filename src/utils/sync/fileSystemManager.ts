@@ -710,47 +710,80 @@ export class FileSystemManager {
 
   /**
    * 生成Markdown代码块格式内容
+   * 不对用户代码内容进行任何修改，保持用户的空行和空格
    */
   private generateMarkdownContent(snippet: CodeSnippet): string {
-    // 【修复】在写入时就规范化语言ID，避免写入无效的语言ID到Git文件
+    // 规范化语言ID，避免写入无效的语言ID到Git文件
     const normalizedLanguage = this.normalizeLanguageId(snippet.language || 'plaintext')
     const code = snippet.code || ''
-    return `\`\`\`${normalizedLanguage}\n${code}\n\`\`\``
+    
+    // 【重要修复】严格按照markdown格式生成，不在代码前后额外添加换行符
+    // 格式: ```language\n{用户代码内容}```
+    // 注意：用户代码内容不做任何修改，完全保持原样
+    return `\`\`\`${normalizedLanguage}\n${code}\`\`\``
   }
 
   /**
    * 解析Markdown代码块格式内容
+   * 使用原始字符串操作，避免正则表达式的问题
    */
   private parseMarkdownContent(content: string): { language: string; code: string } {
-    // 匹配markdown代码块格式: ```language\ncode\n```
-    const match = content.match(/^```(\w*)\n([\s\S]*)\n```$/m)
+    console.log('🔧 parseMarkdownContent 调试:')
+    console.log(`   原始内容长度: ${content.length}`)
+    console.log(`   原始内容前30字符: "${content.substring(0, 30)}"`)
+    console.log(`   原始内容后30字符: "${content.slice(-30)}"`)
     
-    if (match) {
-      const rawLanguage = match[1] || 'plaintext'
-      // 【兼容性修复】处理现有Git文件中可能包含的无效语言ID
-      // 只对明显无效的ID进行映射，避免过度处理
-      const language = this.isInvalidLanguageId(rawLanguage) ? this.normalizeLanguageId(rawLanguage) : rawLanguage
+    // 检查是否以 ``` 开头
+    if (!content.startsWith('```')) {
+      console.log('❌ 内容不是markdown代码块格式（不以```开头）')
       return {
-        language,
-        code: match[2] || ''
+        language: 'plaintext',
+        code: content
       }
     }
     
-    // 如果不是标准格式，尝试提取内容
-    const fallbackMatch = content.match(/^```(\w*)\n?([\s\S]*?)```?$/m)
-    if (fallbackMatch) {
-      const rawLanguage = fallbackMatch[1] || 'plaintext'
-      const language = this.isInvalidLanguageId(rawLanguage) ? this.normalizeLanguageId(rawLanguage) : rawLanguage
+    // 找到第一行的结束位置（第一个换行符）
+    const firstLineEndIndex = content.indexOf('\n')
+    if (firstLineEndIndex === -1) {
+      console.log('❌ 内容格式错误（没有找到换行符）')
       return {
-        language, 
-        code: fallbackMatch[2] || ''
+        language: 'plaintext',
+        code: content
       }
     }
     
-    // 如果完全不匹配，当作纯文本处理
+    // 提取语言标识符（去掉开头的```）
+    const firstLine = content.substring(3, firstLineEndIndex)
+    const language = firstLine.trim() || 'plaintext'
+    
+    // 从第一行之后开始查找结尾的```
+    const contentAfterFirstLine = content.substring(firstLineEndIndex + 1)
+    
+    // 从后往前查找最后一个```的位置
+    const lastTripleBacktickIndex = contentAfterFirstLine.lastIndexOf('```')
+    
+    let code: string
+    if (lastTripleBacktickIndex === -1) {
+      // 没有找到结尾的```，说明格式不完整，返回第一行之后的所有内容
+      console.log('⚠️ 没有找到结尾的```，使用全部剩余内容')
+      code = contentAfterFirstLine
+    } else {
+      // 提取代码内容（从第一行后到最后一个```之前）
+      code = contentAfterFirstLine.substring(0, lastTripleBacktickIndex)
+    }
+    
+    console.log(`   解析结果:`)
+    console.log(`   - 语言: "${language}"`)
+    console.log(`   - 代码长度: ${code.length}`)
+    console.log(`   - 代码前30字符: "${code.substring(0, 30)}"`)
+    console.log(`   - 代码后30字符: "${code.slice(-30)}"`)
+    
+    // 处理可能的无效语言ID
+    const normalizedLanguage = this.isInvalidLanguageId(language) ? this.normalizeLanguageId(language) : language
+    
     return {
-      language: 'plaintext',
-      code: content
+      language: normalizedLanguage,
+      code
     }
   }
 

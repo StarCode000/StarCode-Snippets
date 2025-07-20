@@ -191,6 +191,9 @@ export class SnippetEditor {
             const codeToSave = message.data.code
             const languageFromWebview = message.data.language
             const languageToSave = this.mapVSCodeLanguageIdToOurs(languageFromWebview, currentSession.snippet.language)
+            const saveMethod = message.data.saveMethod || 'unknown' // 获取保存方式
+
+
 
             currentSession.currentCode = codeToSave
 
@@ -205,19 +208,36 @@ export class SnippetEditor {
               currentSession.lastSavedCode = codeToSave
               currentSession.isDirtyInWebview = false
               this._onDidSaveSnippet.fire(updatedSnippet)
-              vscode.window.showInformationMessage(`代码片段 "${updatedSnippet.name}" 已保存。`)
+              
+              // 【修复】确保所有保存方式都有明确的用户反馈
+              const saveMessage = saveMethod === 'shortcut' 
+                ? `代码片段 "${updatedSnippet.name}" 已保存 (Ctrl+S)`
+                : `代码片段 "${updatedSnippet.name}" 已保存`
+              
+              vscode.window.showInformationMessage(saveMessage)
               // 【重要修复】发送消息前检查webview是否还有效
               try {
-                panel.webview.postMessage({ type: 'saveSuccess', snippetId: this.getSnippetId(currentSession.snippet) })
+                panel.webview.postMessage({ 
+                  type: 'saveSuccess', 
+                  snippetId: this.getSnippetId(currentSession.snippet),
+                  saveMethod: saveMethod
+                })
               } catch (error) {
                 console.warn('发送saveSuccess消息失败，webview可能已被销毁:', error)
               }
             } catch (error) {
               console.error('保存代码片段失败 (来自webview):', error)
-              vscode.window.showErrorMessage(`保存代码片段 "${updatedSnippet.name}" 失败。`)
+              const errorMessage = `保存代码片段 "${updatedSnippet.name}" 失败`
+              vscode.window.showErrorMessage(errorMessage)
+              
               // 【重要修复】发送消息前检查webview是否还有效
               try {
-                panel.webview.postMessage({ type: 'saveError', snippetId: this.getSnippetId(currentSession.snippet) })
+                panel.webview.postMessage({ 
+                  type: 'saveError', 
+                  snippetId: this.getSnippetId(currentSession.snippet),
+                  saveMethod: saveMethod,
+                  error: error instanceof Error ? error.message : '未知错误'
+                })
               } catch (error) {
                 console.warn('发送saveError消息失败，webview可能已被销毁:', error)
               }
@@ -621,10 +641,21 @@ export class SnippetEditor {
                         debugLog('内容已更改，已发送 contentChanged 消息');
                       });
 
-                      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, function() {
-                        debugLog('检测到 Ctrl+S 快捷键');
-                        if (!saveInProgress) saveContent();
-                      });
+                      // 【修复】使用多种方式绑定 Ctrl+S 快捷键
+                      
+                      // 方法1: Monaco Editor 内置命令绑定
+                      try {
+                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
+                          debugLog('🎯 Monaco快捷键: 检测到 Ctrl+S');
+                          if (!saveInProgress) {
+                            saveContent('shortcut');
+                          }
+                          return null; // 阻止默认行为
+                        });
+                                                 debugLog('✅ Monaco快捷键绑定成功');
+                       } catch (monacoKeyError) {
+                         debugLog('❌ Monaco快捷键绑定失败: ' + monacoKeyError);
+                       }
                       
                       debugLog('编辑器事件监听器设置完成');
                       updateStatus('编辑器已准备就绪');
@@ -650,43 +681,57 @@ export class SnippetEditor {
                 }
                 break;
               case 'saveSuccess':
-                debugLog('保存成功');
+                const saveMethod = message.saveMethod || 'unknown';
+                debugLog('保存成功 (方式: ' + saveMethod + ')');
                 internalDirtyFlag = false; 
                 saveInProgress = false;
-                updateStatus('已保存!');
+                const successMessage = saveMethod === 'shortcut' ? '已保存! (Ctrl+S)' : '已保存!';
+                updateStatus(successMessage);
                 break;
               case 'saveError':
-                debugLog('保存失败');
+                const errorSaveMethod = message.saveMethod || 'unknown';
+                const errorDetails = message.error || '未知错误';
+                debugLog('保存失败 (方式: ' + errorSaveMethod + '): ' + errorDetails);
                 saveInProgress = false;
-                updateStatus('保存失败!', true);
+                const errorMessage = errorSaveMethod === 'shortcut' ? '保存失败! (Ctrl+S)' : '保存失败!';
+                updateStatus(errorMessage, true);
+                // 显示详细错误信息
+                debugLog('错误详情: ' + errorDetails);
                 break;
             }
           });
 
-          function saveContent() {
+                    function saveContent(saveMethod = 'button') {
             if (editor && internalDirtyFlag && !saveInProgress) {
               saveInProgress = true;
-              updateStatus('正在保存...');
+              const statusMessage = saveMethod === 'shortcut' ? '正在保存... (Ctrl+S)' : '正在保存...';
+              updateStatus(statusMessage);
               const codeToSave = editor.getValue();
-              debugLog('保存内容，长度: ' + codeToSave.length);
+              debugLog('保存内容，长度: ' + codeToSave.length + ' (方式: ' + saveMethod + ')');
               debugLog('保存语言: ' + currentLanguage);
+              
               vscode.postMessage({
                 type: 'saveSnippet',
                 snippetId: currentSnippetId,
                 data: {
                   code: codeToSave,
-                  language: currentLanguage 
+                  language: currentLanguage,
+                  saveMethod: saveMethod
                 }
               });
+              
             } else if (editor && !internalDirtyFlag && !saveInProgress) {
-               updateStatus('内容未更改。');
-               debugLog('内容未更改，不需要保存');
-            }
+                const noChangeMessage = saveMethod === 'shortcut' ? '内容未更改 (Ctrl+S)' : '内容未更改';
+                updateStatus(noChangeMessage);
+                debugLog('内容未更改，不需要保存 (方式: ' + saveMethod + ')');
+             } else if (saveInProgress) {
+                updateStatus('保存正在进行中...');
+                debugLog('保存已在进行中，忽略重复请求 (方式: ' + saveMethod + ')');
+             }
           }
           
           document.getElementById('save-button').addEventListener('click', () => {
-             debugLog('点击保存按钮');
-             if (!saveInProgress) saveContent();
+             if (!saveInProgress) saveContent('button');
           });
 
           window.addEventListener('beforeunload', (event) => {
