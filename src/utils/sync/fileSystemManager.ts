@@ -932,28 +932,6 @@ export class FileSystemManager {
   }
 
   /**
-   * 根据语言获取文件扩展名
-   */
-  private getExtensionByLanguage(language: string): string {
-    return this.languageExtensionMap[language] || '.txt'
-  }
-
-  /**
-   * 从文件扩展名检测语言
-   */
-  private detectLanguageFromExtension(fileName: string): string | null {
-    const ext = path.extname(fileName).toLowerCase()
-    
-    for (const [language, extension] of Object.entries(this.languageExtensionMap)) {
-      if (extension === ext) {
-        return language
-      }
-    }
-    
-    return null
-  }
-
-  /**
    * 从文件名生成用户友好名称
    */
   private generateNameFromFileName(fileName: string): string {
