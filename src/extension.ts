@@ -17,6 +17,7 @@ import { ContextManager } from './utils/contextManager'
 import { StorageStrategyFactory, V1StorageStrategy, V2StorageStrategy } from './utils/storageStrategy'
 import { StorageContext } from './utils/storageContext'
 import { PathBasedManager } from './utils/pathBasedManager'
+import { ContextMenuManager } from './utils/contextMenuManager'
 import { 
   validateFileSystemSafety, 
   checkSnippetDirectoryConflict, 
@@ -541,6 +542,9 @@ function registerCommands(
 ): vscode.Disposable[] {
   // 创建导入导出管理器
   const importExportManager = new ImportExportManager(storageManager, storageContext)
+  
+  // 创建上下文菜单管理器
+  const contextMenuManager = new ContextMenuManager(storageManager, storageContext)
 
   // 内部刷新视图函数
   function refreshTreeView(): void {
@@ -859,7 +863,7 @@ function registerCommands(
           snippet = snippetOrTreeItem.snippet
         }
         
-        if (!snippet || !snippet.code) {
+        if (!snippet || snippet.code === undefined || snippet.code === null) {
           console.warn('预览失败：代码片段数据无效', snippet)
           vscode.window.showErrorMessage('预览失败：代码片段数据无效')
           return
@@ -895,7 +899,9 @@ function registerCommands(
           TextDocumentContentProvider.register(context)
         }
 
-        TextDocumentContentProvider.instance.update(uri, snippet.code, language)
+        // 如果代码片段为空，显示友好提示
+        const codeContent = snippet.code || '// 这是一个空的代码片段\n// 点击编辑按钮开始添加代码'
+        TextDocumentContentProvider.instance.update(uri, codeContent, language)
         TextDocumentContentProvider.instance.setOpenPreview(snippetId, uri)
 
         const document = await vscode.workspace.openTextDocument(uri)
@@ -2231,6 +2237,24 @@ function registerCommands(
 
   // 【已删除】测试真实文件存储系统命令 - 清理测试命令
 
+  // 注册粘贴代码片段命令（分层菜单）
+  const pasteSnippetHierarchical = vscode.commands.registerCommand('starcode-snippets.pasteSnippetHierarchical', async () => {
+    try {
+      const selectedSnippet = await contextMenuManager.showHierarchicalMenu()
+      if (selectedSnippet) {
+        const success = await insertSnippet(selectedSnippet)
+        if (success) {
+          vscode.window.showInformationMessage(`✅ 已粘贴代码片段: ${selectedSnippet.name}`)
+        } else {
+          vscode.window.showWarningMessage('请先打开一个编辑器窗口')
+        }
+      }
+    } catch (error) {
+      console.error('粘贴代码片段失败:', error)
+      vscode.window.showErrorMessage(`粘贴代码片段失败: ${error}`)
+    }
+  })
+
   // 返回所有注册的命令
   return [
     refreshExplorer,
@@ -2266,6 +2290,7 @@ function registerCommands(
     forcePushToCloud,
     forceImportFromGitRepo,
     applyResolvedConflicts,
+    pasteSnippetHierarchical,
     // testRealFileStorage, // 【已删除】测试命令
   ]
 }

@@ -97,17 +97,28 @@ export class ConflictResolver {
 
   /**
    * 解决目录冲突
-   * 主要基于时间戳，但会保留有用的描述信息
+   * 【修复】采用保守策略，优先保护本地数据
    */
   public resolveDirectoryConflict(local: Directory, remote: Directory): {
     strategy: 'use_local' | 'use_remote' | 'use_newer'
     resolved: Directory
   } {
-    // V2类型没有createTime，直接选择远程版本
-    // 在V2中，fullPath是唯一标识，冲突通常意味着属性不同
+    // V2类型没有createTime，使用名称长度作为质量指标
+    // 名称更详细的版本通常包含更多有用信息
     
-    // 策略: 默认使用远程版本，保持与云端一致
-    return { strategy: 'use_remote', resolved: remote }
+    const localNameLength = (local.name || '').trim().length
+    const remoteNameLength = (remote.name || '').trim().length
+    
+    if (localNameLength > remoteNameLength) {
+      // 本地名称更详细，使用本地版本
+      return { strategy: 'use_local', resolved: local }
+    } else if (remoteNameLength > localNameLength) {
+      // 远程名称更详细，使用远程版本
+      return { strategy: 'use_remote', resolved: remote }
+    }
+    
+    // 【重要修复】如果名称长度相同或都为空，优先保护本地数据
+    return { strategy: 'use_local', resolved: local }
   }
 
   /**
